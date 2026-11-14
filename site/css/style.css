@@ -281,6 +281,18 @@ html[dir="rtl"] .status-tag { letter-spacing: 0; }
 .chip.on { background: var(--nasa-blue); border-color: var(--nasa-blue); color: #fff; }
 .chip:disabled { opacity: .45; cursor: not-allowed; }
 
+/* grouped layer selector (js/components/layer-control.js) */
+.chip-groups { display: flex; flex-direction: column; gap: 10px; }
+.chip-group-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); margin-bottom: 5px;
+}
+html[dir="rtl"] .chip-group-label { letter-spacing: 0; }
+
+/* a period control that does not apply to the active layer */
+.field.off { opacity: .5; }
+.field.off select, .field.off .play { cursor: not-allowed; }
+
 /* search + list */
 .search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--r-md); padding: 0 10px; height: 38px; background: var(--surface); }
 .search .icon { color: var(--muted); }
