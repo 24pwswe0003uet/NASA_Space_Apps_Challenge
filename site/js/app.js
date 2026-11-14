@@ -12,17 +12,14 @@
   function DATA() { return BASES[baseIndex]; }
   var COLORS = { green: '#15803d', amber: '#d97706', red: '#c2250f', nodata: '#94a3b8' };
   var RAMP = ['#eef4ea', '#cfe2c4', '#a3cb98', '#5fa86d', '#15803d'];
-  var HA_LAYERS = [
-    { key: 'crop_ha', icon: 'sprout' },
-    { key: 'wheat_ha', icon: 'wheat' },
-    { key: 'maize_ha', icon: 'maize' },
-    { key: 'irrigated_ha', icon: 'irrigation' }
-  ];
+  // Layer catalog + helpers live in js/layers and js/services; the map reads them
+  // instead of hardcoding which layers exist.
+  var Layers = window.AtlasLayers, LayerControl = window.AtlasLayerControl, Temporal = window.AtlasTemporal;
 
   var state = {
     lang: localStorage.getItem('atlas.lang') || 'en',
     level: 'province', districtId: null, ucId: null,
-    dekadIndex: null, layer: 'status', query: '', detail: false, playing: false
+    dekadIndex: null, layer: Layers.defaultId || 'status', query: '', detail: false, playing: false
   };
   var meta = null, strings = {}, districts = null;
   var ucCache = {}, seriesCache = {};
@@ -130,8 +127,7 @@
     state.detail = want;
     if (!want) {
       if (ucLayer) { map.removeLayer(ucLayer); ucLayer = null; }
-      drawDistricts(provinceStatuses);
-      renderLegend();
+      renderLegend(drawDistricts(provinceStatuses));
       return;
     }
     setLoading(true);
@@ -139,7 +135,7 @@
       if (state.level !== 'province' || !state.detail) { setLoading(false); return; }
       return statusesFor(fc.features, 'uc_id').then(function (st) {
         drawDistricts(provinceStatuses);
-        drawUCs(fc, st);
+        renderLegend(drawUCs(fc, st));
         setLoading(false);
       });
     });
@@ -158,6 +154,11 @@
   function isLatest() { return state.dekadIndex === meta.dekads.length - 1; }
   function hasCropType() { return meta.sources.crop_type && meta.sources.crop_type.status === 'live'; }
   function demandLabel() { return meta.et_method === 'wapor_aeti' ? t('demand_actual') : t('demand_ref'); }
+  function currentLayer() { return Layers.resolve(state.layer); }
+  function isStatusLayer() { return currentLayer().id === 'status'; }
+  function layerUnit(l) { return t((l || currentLayer()).unit); }
+  // keep the header period control in step with whether the active layer is time-based
+  function syncTemporal() { if (Temporal) Temporal.apply(Layers.isTemporal(currentLayer().id), t); }
 
   // ------------------------------------------------------------------ map
   var ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/';
@@ -235,9 +236,17 @@
       el('span', { text: state.detail ? t('detail_on') : t('detail_off') })]);
   }
   function restyle() {
-    if (districtLayer) districtLayer.setStyle(function (f) {
-      return styleFor(f.properties._st || f.properties.status, state.level !== 'province');
-    });
+    if (!districtLayer) return;
+    if (isStatusLayer()) {
+      districtLayer.setStyle(function (f) {
+        return styleFor(f.properties._st || f.properties.status, state.level !== 'province');
+      });
+      return;
+    }
+    var layer = currentLayer();
+    var breaks = quantiles(districts.features.map(function (f) { return f.properties[layer.id]; }));
+    var dim = state.level !== 'province' || state.detail;
+    districtLayer.setStyle(function (f) { return rampStyle(haColor(f.properties[layer.id], breaks), dim); });
   }
   function fit(bounds, pad) {
     map.invalidateSize();
@@ -248,6 +257,11 @@
     var dark = activeBase === 'imagery';
     return { color: dark ? '#0f141b' : '#ffffff', weight: dim ? 0.7 : 1.1, opacity: dim ? 0.6 : 1,
              fillColor: COLORS[status] || COLORS.nodata, fillOpacity: dim ? 0.2 : (dark ? 0.62 : 0.8) };
+  }
+  function rampStyle(fillColor, dim) {
+    var dark = activeBase === 'imagery';
+    return { color: dark ? '#0f141b' : '#ffffff', weight: dim ? 0.7 : 1.1, opacity: dim ? 0.6 : 1,
+             fillColor: fillColor, fillOpacity: dim ? 0.2 : (dark ? 0.62 : 0.85) };
   }
   function hoverable(layer, baseStyle) {
     layer.on('mouseover', function () {
@@ -305,53 +319,58 @@
   function drawDistricts(statusById) {
     if (districtLayer) map.removeLayer(districtLayer);
     resetLabels();
-    var detailed = state.level !== 'province' || state.detail;
-    var dim = detailed;
+    var layer = currentLayer();
+    var status = layer.id === 'status';
+    var dim = state.level !== 'province' || state.detail;
+    var breaks = status ? null
+      : quantiles(districts.features.map(function (f) { return f.properties[layer.id]; }));
+    function fill(p) { return status ? styleFor(p._st, dim) : rampStyle(haColor(p[layer.id], breaks), dim); }
     districtLayer = L.geoJSON(districts, {
-      style: function (f) { return styleFor(statusById ? statusById[f.properties.district_id] : f.properties.status, dim); },
-      onEachFeature: function (f, layer) {
+      style: function (f) { var p = f.properties; p._st = statusById ? statusById[p.district_id] : p.status; return fill(p); },
+      onEachFeature: function (f, layer2) {
         var p = f.properties;
         p._st = statusById ? statusById[p.district_id] : p.status;
         if (!dim) {
-          var def = isLatest() ? p.deficit_mm : null;
-          addLabel(layer, '<span class="ml-n">' + nameOf(p) + '</span>' +
-            (def != null ? '<span class="ml-v">' + Math.round(def) + ' ' + t('mm') + '</span>' : ''));
-          hoverable(layer, function () { return styleFor(p._st, false); });
+          var val = status
+            ? (isLatest() && p.deficit_mm != null ? Math.round(p.deficit_mm) + ' ' + t('mm') : '')
+            : (p[layer.id] == null ? '' : fmtInt(p[layer.id]) + ' ' + layerUnit(layer));
+          addLabel(layer2, '<span class="ml-n">' + nameOf(p) + '</span>' +
+            (val ? '<span class="ml-v">' + val + '</span>' : ''));
+          hoverable(layer2, function () { return status ? styleFor(p._st, false) : rampStyle(haColor(p[layer.id], breaks), false); });
         }
-        layer.on('click', function () { openDistrict(p.district_id); });
+        layer2.on('click', function () { openDistrict(p.district_id); });
       }
     }).addTo(map);
     if (dim && ucLayer) ucLayer.bringToFront();
     updateLabels();
+    return breaks;
   }
 
   function drawUCs(fc, statusById) {
     if (ucLayer) map.removeLayer(ucLayer);
-    var breaks = state.layer !== 'status'
-      ? quantiles(fc.features.map(function (f) { return f.properties[state.layer]; })) : null;
-    /* eslint-disable no-unused-vars */
+    var layer = currentLayer();
+    var status = layer.id === 'status';
+    var breaks = status ? null
+      : quantiles(fc.features.map(function (f) { return f.properties[layer.id]; }));
     ucLayer = L.geoJSON(fc, {
       style: function (f) {
         var p = f.properties;
-        if (state.layer === 'status') return styleFor(statusById ? statusById[p.uc_id] : p.status, false);
-        return { color: '#ffffff', weight: 1.1, fillColor: haColor(p[state.layer], breaks), fillOpacity: 0.88 };
+        if (status) return styleFor(statusById ? statusById[p.uc_id] : p.status, false);
+        return rampStyle(haColor(p[layer.id], breaks), false);
       },
-      onEachFeature: function (f, layer) {
+      onEachFeature: function (f, lyr) {
         var p = f.properties;
         var st = statusById ? statusById[p.uc_id] : p.status;
-        var val = state.layer === 'status'
+        var val = status
           ? (isLatest() && p.deficit_mm != null ? Math.round(p.deficit_mm) + ' ' + t('mm') : '')
-          : (p[state.layer] == null ? '' : fmtInt(p[state.layer]) + ' ' + t('ha'));
-        addLabel(layer, '<span class="ml-n">' + p.uc_name_en + '</span>' +
+          : (p[layer.id] == null ? '' : fmtInt(p[layer.id]) + ' ' + layerUnit(layer));
+        addLabel(lyr, '<span class="ml-n">' + p.uc_name_en + '</span>' +
           (val ? '<span class="ml-v">' + val + '</span>' : ''));
-        var base = function () {
-          if (state.layer === 'status') return styleFor(st, false);
-          return { color: activeBase === 'imagery' ? '#0f141b' : '#ffffff', weight: 1.1,
-                   fillColor: haColor(p[state.layer], breaks), fillOpacity: 0.88 };
-        };
-        hoverable(layer, base);
-        layer.on('click', function () { openUC(p.district_id, p.uc_id); });
-        if (state.ucId === p.uc_id) layer.setStyle({ color: '#0f141b', weight: 2.8, fillOpacity: 0.92 });
+        hoverable(lyr, function () {
+          return status ? styleFor(st, false) : rampStyle(haColor(p[layer.id], breaks), false);
+        });
+        lyr.on('click', function () { openUC(p.district_id, p.uc_id); });
+        if (state.ucId === p.uc_id) lyr.setStyle({ color: '#0f141b', weight: 2.8, fillOpacity: 0.92 });
       }
     }).addTo(map);
     ucLayer.bringToFront();
@@ -370,17 +389,18 @@
 
   // ------------------------------------------------------------------ legend
   function renderLegend(breaks) {
+    var layer = currentLayer();
+    var showStatus = layer.id === 'status';
     var box = qs('legend');
     box.className = 'legend' + (legendOpen ? '' : ' closed');
     box.innerHTML = '';
-    var showStatus = state.layer === 'status' || state.level === 'province';
     var head = el('button', { 'class': 'legend-head', type: 'button', onclick: function () {
       legendOpen = !legendOpen;
       localStorage.setItem('atlas.legend', legendOpen ? 'open' : 'closed');
       renderLegend(breaks);
     } }, [
       icon(showStatus ? 'droplet' : 'layers'),
-      el('b', { text: showStatus ? t('legend_title') : t('layer_' + state.layer) }),
+      el('b', { text: showStatus ? t('legend_title') : t(layer.nameKey) }),
       icon('chevron-right', 'caret icon-sm')
     ]);
     box.appendChild(head);
@@ -398,23 +418,26 @@
     } else {
       body.appendChild(el('div', { 'class': 'ramp' }));
       body.appendChild(el('div', { 'class': 'ramp-labels' }, [
-        el('span', { text: '0' }), el('span', { text: fmtInt(breaks && breaks[3]) + '+ ' + t('ha') })]));
-      body.appendChild(el('div', { 'class': 'legend-note', text: t('layer_note') }));
+        el('span', { text: '0' }), el('span', { text: fmtInt(breaks && breaks[3]) + '+ ' + layerUnit(layer) })]));
+      body.appendChild(el('div', { 'class': 'legend-note',
+        text: t(state.level === 'province' ? 'layer_note_province' : 'layer_note') }));
     }
     box.appendChild(body);
+    syncTemporal();
   }
 
   // ------------------------------------------------------------------ province
-  function openProvince() {
-    state.level = 'province'; state.districtId = null; state.ucId = null; state.layer = 'status';
+  function openProvince(keepView) {
+    state.level = 'province'; state.districtId = null; state.ucId = null;
+    if (!Layers.isAvailable(currentLayer(), meta, districts.features)) state.layer = Layers.defaultId;
     if (ucLayer) { map.removeLayer(ucLayer); ucLayer = null; }
     setLoading(true);
     statusesFor(districts.features, 'district_id').then(function (st) {
       provinceStatuses = st;
       state.detail = map.getZoom() >= DETAIL_ZOOM;
-      drawDistricts(st);
-      if (!state.playing) fit(districtLayer.getBounds(), 12);
-      renderLegend();
+      var breaks = drawDistricts(st);
+      if (!keepView && !state.playing) fit(districtLayer.getBounds(), 12);
+      renderLegend(breaks);
       renderProvince(st);
       showPanel(window.innerWidth > 820);
       setLoading(false);
@@ -423,7 +446,29 @@
     history.replaceState(null, '', '#');
   }
 
+  // switch the active map layer from anywhere; keeps the current view and level
+  function setLayer(id) {
+    if (!Layers.get(id) || id === state.layer) return;
+    state.layer = id;
+    if (state.level === 'province') openProvince(true);
+    else if (state.level === 'district') openDistrict(state.districtId, true);
+    else if (state.level === 'uc') openUC(state.districtId, state.ucId);
+  }
+
+  function valueOf(p) {
+    var layer = currentLayer();
+    if (layer.id === 'status') return isLatest() ? p.deficit_mm : null;
+    return p[layer.id];
+  }
+  function valueText(p) {
+    var layer = currentLayer();
+    if (layer.id === 'status') return isLatest() && p.deficit_mm != null ? fmtMm(p.deficit_mm) + ' ' + t('mm') : '';
+    return p[layer.id] == null ? t('not_connected') : fmtInt(p[layer.id]) + ' ' + layerUnit(layer);
+  }
   function renderProvince(statusById) {
+    var layer = currentLayer();
+    var status = layer.id === 'status';
+    var breaks = status ? null : quantiles(districts.features.map(function (f) { return f.properties[layer.id]; }));
     var inner = panelShell();
     inner.appendChild(el('div', { 'class': 'crumbs' }, [el('span', { 'class': 'here', text: t('province') })]));
     inner.appendChild(el('div', { 'class': 'title-row' }, [el('h1', { text: t('province') })]));
@@ -443,6 +488,11 @@
     });
     inner.appendChild(grid);
 
+    inner.appendChild(el('h2', {}, [icon('layers'), document.createTextNode(t('layers'))]));
+    inner.appendChild(LayerControl.render({
+      currentId: layer.id, meta: meta, features: districts.features, t: t, onSelect: setLayer
+    }));
+
     inner.appendChild(el('h2', {}, [icon('chart'), document.createTextNode(t('trend_title'))]));
     var trend = el('div', { 'class': 'chart', style: 'height:180px' });
     inner.appendChild(trend);
@@ -451,17 +501,16 @@
     inner.appendChild(el('h2', {}, [icon('map'), document.createTextNode(t('districts_title', { n: districts.features.length }))]));
     inner.appendChild(searchBox());
     var rows = districts.features.slice().sort(function (a, b) {
-      return (b.properties.deficit_mm == null ? -1e9 : b.properties.deficit_mm)
-           - (a.properties.deficit_mm == null ? -1e9 : a.properties.deficit_mm);
+      var av = valueOf(a.properties), bv = valueOf(b.properties);
+      return (bv == null ? -1e9 : bv) - (av == null ? -1e9 : av);
     }).filter(matchQuery(function (p) { return nameOf(p) + ' ' + p.name_en; }));
     var list = el('ul', { 'class': 'list' });
     rows.forEach(function (f) {
       var p = f.properties, st = statusById ? statusById[p.district_id] : p.status;
-      var row = listRow(COLORS[st], nameOf(p),
-        isLatest() && p.deficit_mm != null ? fmtMm(p.deficit_mm) + ' ' + t('mm') : '',
-        function () { openDistrict(p.district_id); });
+      var dot = status ? COLORS[st] : haColor(p[layer.id], breaks);
+      var row = listRow(dot, nameOf(p), valueText(p), function () { openDistrict(p.district_id); });
       list.appendChild(row);
-      movement(p.district_id, row);
+      if (status) movement(p.district_id, row);
     });
     if (!rows.length) list.appendChild(el('li', { 'class': 'hint', text: t('no_match') }));
     inner.appendChild(list);
@@ -535,7 +584,7 @@
   function renderDistrict(dFeature, fc, dser, statusById) {
     var p = dFeature.properties, inner = panelShell();
     inner.appendChild(el('div', { 'class': 'crumbs' }, [
-      el('button', { onclick: openProvince }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))]),
+      el('button', { onclick: function () { openProvince(); } }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))]),
       el('span', { 'class': 'here', text: nameOf(p) })]));
     inner.appendChild(el('div', { 'class': 'title-row' }, [el('h1', { text: nameOf(p) })]));
     inner.appendChild(el('p', { 'class': 'sub', text: t('district_sub', { n: fc.features.length }) }));
@@ -546,21 +595,9 @@
     if (!hasCropType()) inner.appendChild(cropTypeNotice());
 
     inner.appendChild(el('h2', {}, [icon('layers'), document.createTextNode(t('layers'))]));
-    var chips = el('div', { 'class': 'chips' });
-    chips.appendChild(el('button', {
-      'class': 'chip' + (state.layer === 'status' ? ' on' : ''), type: 'button',
-      onclick: function () { state.layer = 'status'; openDistrict(p.district_id, true); }
-    }, [icon('droplet', 'icon-sm'), document.createTextNode(t('layer_status'))]));
-    HA_LAYERS.forEach(function (L2) {
-      var available = fc.features.some(function (f) { return f.properties[L2.key] != null; });
-      chips.appendChild(el('button', {
-        'class': 'chip' + (state.layer === L2.key ? ' on' : ''), type: 'button',
-        disabled: available ? null : 'disabled',
-        title: available ? null : t('not_connected'),
-        onclick: function () { state.layer = L2.key; openDistrict(p.district_id, true); }
-      }, [icon(L2.icon, 'icon-sm'), document.createTextNode(t('layer_' + L2.key))]));
-    });
-    inner.appendChild(chips);
+    inner.appendChild(LayerControl.render({
+      currentId: currentLayer().id, meta: meta, features: fc.features, t: t, onSelect: setLayer
+    }));
 
     inner.appendChild(el('h2', {}, [icon('chart'), document.createTextNode(t('chart_title'))]));
     var dchart = el('div', { 'class': 'chart' });
@@ -569,20 +606,21 @@
 
     inner.appendChild(el('h2', {}, [icon('map'), document.createTextNode(t('ucs_title', { n: fc.features.length }))]));
     inner.appendChild(searchBox());
+    var layer = currentLayer();
+    var status = layer.id === 'status';
+    var breaks = status ? null : quantiles(fc.features.map(function (f) { return f.properties[layer.id]; }));
     var rows = fc.features.slice().sort(function (a, b) {
-      return (b.properties.deficit_mm == null ? -1e9 : b.properties.deficit_mm)
-           - (a.properties.deficit_mm == null ? -1e9 : a.properties.deficit_mm);
+      var av = valueOf(a.properties), bv = valueOf(b.properties);
+      return (bv == null ? -1e9 : bv) - (av == null ? -1e9 : av);
     }).filter(matchQuery(function (q) { return q.uc_name_en; }));
     var list = el('ul', { 'class': 'list' });
     rows.forEach(function (f) {
       var u = f.properties, st = statusById ? statusById[u.uc_id] : u.status;
-      var val = state.layer === 'status'
-        ? (isLatest() && u.deficit_mm != null ? fmtMm(u.deficit_mm) + ' ' + t('mm') : '')
-        : (u[state.layer] == null ? t('not_connected') : fmtInt(u[state.layer]) + ' ' + t('ha'));
-      var row = listRow(COLORS[st], u.uc_name_en, val, function () { openUC(u.district_id, u.uc_id); },
-        state.layer !== 'status' && u[state.layer] == null);
+      var dot = status ? COLORS[st] : haColor(u[layer.id], breaks);
+      var row = listRow(dot, u.uc_name_en, valueText(u), function () { openUC(u.district_id, u.uc_id); },
+        !status && u[layer.id] == null);
       list.appendChild(row);
-      if (state.layer === 'status') movement(u.uc_id, row);
+      if (status) movement(u.uc_id, row);
     });
     if (!rows.length) list.appendChild(el('li', { 'class': 'hint', text: t('no_match') }));
     inner.appendChild(list);
@@ -600,8 +638,7 @@
       var f = fc.features.filter(function (x) { return x.properties.uc_id === ucId; })[0];
       if (!f) { openDistrict(did); return; }
       return statusesFor(fc.features, 'uc_id').then(function (st) {
-        drawUCs(fc, st);
-        renderLegend();
+        renderLegend(drawUCs(fc, st));
         renderUC(f, ser);
         showPanel(true);
         var layer = ucLayer.getLayers().filter(function (l) { return l.feature.properties.uc_id === ucId; })[0];
@@ -615,7 +652,7 @@
   function renderUC(f, ser) {
     var p = f.properties, inner = panelShell();
     inner.appendChild(el('div', { 'class': 'crumbs' }, [
-      el('button', { onclick: openProvince }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))]),
+      el('button', { onclick: function () { openProvince(); } }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))]),
       icon('chevron-right', 'icon-sm'),
       el('button', { onclick: function () { openDistrict(p.district_id); } }, [document.createTextNode(nameOf(p))]),
       el('span', { 'class': 'here', text: p.uc_name_en })]));
@@ -741,11 +778,11 @@
   }
   function hectares(p) {
     var grid = el('div', { 'class': 'stats' });
-    HA_LAYERS.forEach(function (L2) {
-      var v = p[L2.key], has = v != null;
+    Layers.continuous().forEach(function (L2) {
+      var v = p[L2.id], has = v != null;
       grid.appendChild(el('div', { 'class': 'stat' + (has ? '' : ' empty') }, [
-        el('div', { 'class': 'k' }, [icon(L2.icon, 'icon-sm'), document.createTextNode(t('layer_' + L2.key))]),
-        has ? el('div', { 'class': 'v num' }, [document.createTextNode(fmtInt(v)), el('small', { text: ' ' + t('ha') })])
+        el('div', { 'class': 'k' }, [icon(L2.icon, 'icon-sm'), document.createTextNode(t(L2.nameKey))]),
+        has ? el('div', { 'class': 'v num' }, [document.createTextNode(fmtInt(v)), el('small', { text: ' ' + layerUnit(L2) })])
             : el('div', { 'class': 'v', text: t('not_connected') })]));
     });
     return grid;
@@ -870,6 +907,7 @@
     qs('langSelect').value = state.lang;
     localStorage.setItem('atlas.lang', state.lang);
     fillDekads();
+    syncTemporal();
     qs('footGenerated').textContent = t('generated', { ts: stamp(meta.generated_at) });
     qs('footSources').textContent = t('footer_sources');
     qs('mapToggleLabel').textContent = document.body.classList.contains('show-map') ? t('show_details') : t('show_map');
