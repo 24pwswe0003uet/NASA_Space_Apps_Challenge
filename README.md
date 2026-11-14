@@ -7,10 +7,11 @@ The first public map of **what grows where in Khyber Pakhtunkhwa, which land is 
 ![Validate data](https://github.com/HamidKhan1001/NASA_Space_Apps_Challenge/actions/workflows/validate-data.yml/badge.svg) ![Update data](https://github.com/HamidKhan1001/NASA_Space_Apps_Challenge/actions/workflows/update-data.yml/badge.svg)
 
 ## What it shows
-1. **Province:** 31 districts coloured green, amber or red by water balance for the latest dekad (ten days). Six dekads to choose from. English, Urdu, Pashto.
-2. **District:** its union councils (tehsils in v0.1), coloured by status, or shaded by hectares of cropland, winter cereals, maize or irrigated area.
+1. **Province:** 31 districts coloured green, amber or red by water balance for the latest ten-day period, with a chart of how the whole province moved across the last six. Press play to animate them. Switch between a plain map, satellite imagery and terrain, and zoom in to reveal every union council. English, Urdu, Pashto.
+2. **District:** its union councils (tehsils in v0.1), coloured by status or shaded by hectares, with a searchable list sorted driest first and an arrow showing which way each unit moved.
 3. **Union council:** hectares, the deficit in millimetres, a six-dekad chart of crop water use against rainfall, CSV and GeoJSON download, sources and dates.
-4. **Methods and validation:** what each dataset is, how the traffic light is computed, and our cropped-area numbers against the 2024 Agricultural Census, including where they disagree.
+4. **Guide:** a built-in tutorial at `/guide.html` in all three languages that explains the colours, the five steps, the vocabulary and the limits.
+5. **Methods and validation:** what each dataset is, how the traffic light is computed, and our cropped-area numbers against the 2024 Agricultural Census, including where they disagree.
 
 Deficit = actual evapotranspiration (FAO WaPOR v3) − rainfall (NASA POWER), on irrigated winter-cereal land (ESA WorldCereal 2021). Green ≤ 0 mm, amber ≤ 30 mm, red > 30 mm. The reasoning is in [docs/thresholds.md](docs/thresholds.md).
 
@@ -39,7 +40,18 @@ python3 pipeline/validate_data.py
 Without Earth Engine credentials and `pipeline/worldcereal_stats.csv`, evapotranspiration and hectares are clearly flagged placeholders and the site shows a **DEMO DATA** badge. Rainfall and boundaries are real from the first run. See [pipeline/README.md](pipeline/README.md).
 
 ## Deploy
-Push to `main`. `deploy-pages.yml` stages `site/` with `data/` and `docs/` and publishes to GitHub Pages. `update-data.yml` re-runs the pipeline every Monday 03:00 UTC (or on demand) and commits `data: dekad YYYY-MM-DD`.
+
+There is no server and no database. The pipeline writes static files, the site reads them, and a scheduled job keeps them current. Nothing can crash during a demo, and hosting costs nothing.
+
+```
+NASA POWER + ESA data  ->  weekly job  ->  /data/*.json  ->  static site
+```
+
+**The site** goes to GitHub Pages. Settings, then Pages, source GitHub Actions. `deploy-pages.yml` runs `./scripts/build-site.sh` and publishes on every push to `main`. Any other static host works the same way: build with that script, serve `_site`.
+
+**The data** is what a backend would otherwise do. `update-data.yml` re-runs the pipeline every Monday at 03:00 UTC, or on demand from the Actions tab, and commits `data: dekad YYYY-MM-DD`. That commit triggers a fresh deploy, so the map updates itself.
+
+To switch it on: Actions tab, enable workflows, select **Update data (weekly)**, then **Run workflow**. Let it go green once by hand before relying on the schedule.
 
 ## Data sources and licences
 ESA WorldCereal 2021 (CC BY 4.0) · FAO WaPOR v3 (CC BY 4.0) · NASA POWER (public domain) · geoBoundaries (public domain / CC BY). Details and known weaknesses in [docs/sources.md](docs/sources.md). Code is MIT; data files carry attribution to ESA, FAO and NASA.
