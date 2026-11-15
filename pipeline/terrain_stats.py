@@ -125,7 +125,8 @@ def main():
             continue
         shapes = [(geom, index[uid]) for uid, geom in here]
         zones = rasterize(shapes, out_shape=(HGT_SIDE, HGT_SIDE), transform=transform, fill=0, dtype="int32")
-        valid = (zones > 0) & np.isfinite(arr)
+        # voids make the gradient NaN at neighbouring pixels, so require a finite slope too
+        valid = (zones > 0) & np.isfinite(arr) & np.isfinite(slope)
         if not valid.any():
             continue
         z = zones[valid]
