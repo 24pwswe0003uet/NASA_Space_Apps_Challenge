@@ -54,3 +54,42 @@ One per union council **and** one per district (`id` = `uc_id` or `district_id`)
 ## Known deviations in v0.1
 - Level-3 units are **tehsils** (geoBoundaries ADM3, 2017), not union councils. Keys are kept as `uc_*` so the site does not change when UC polygons arrive.
 - 31 districts (2019 boundaries), not 35. Chitral, Kohistan and Torghar splits are not represented.
+
+## Additive v0.3 — derived indicators
+
+`contract_version` becomes `"0.3"` when `meta.json.indicators` is present. All
+v0.2 files keep their exact shape; a v0.2 consumer that ignores the additions
+keeps working. See `docs/indicators.md` for method, parameters and limitations.
+
+New in `meta.json`:
+```json
+"indicators": [
+  {"id": "frost_days", "name_en": "Frost days", "unit": "days", "period": "dekad",
+   "category": "climate", "aggregation": "count", "params": {"frost_threshold_c": 0.0},
+   "source_id": "nasa_power", "product_version": "...", "resolution_m": 55000,
+   "documentation": "docs/indicators.md"}
+]
+```
+`sources` also gains `nasa_power` and `srtm` entries (each with name, dataset,
+status, licence).
+
+New files:
+- `data/indicators/<indicator_id>/<unit_id>.json` — time-based, one per unit:
+  ```json
+  {"unit_id": "PK.KP.CHA", "indicator": "frost_days", "unit": "days", "period": "dekad",
+   "aggregation": "count", "params": {"frost_threshold_c": 0.0}, "source_id": "nasa_power",
+   "dekads": [{"start": "2026-09-11", "end": "2026-09-20", "value": 0, "valid_days": 10, "quality": "ok"}],
+   "generated_at": "..."}
+  ```
+  `dekads` must match `meta.json.dekads` exactly; `value` is a number or `null`.
+- `data/static/<unit_id>.json` — static, one per unit:
+  ```json
+  {"unit_id": "PK.KP.CHA", "source_id": "srtm", "resolution_m": 30,
+   "elevation_m": {"mean": 320.1, "min": 280.0, "max": 401.2},
+   "slope_deg": {"mean": 1.4, "max": 12.0},
+   "slope_class_share": {"0-2": 0.72, "2-5": 0.2, "5-10": 0.07, "10-15": 0.01, "gt15": 0.0},
+   "valid_pixels": 123456, "generated_at": "..."}
+  ```
+
+Each district/tehsil feature additionally carries `frost_days`, `gdd`, `t_mean`,
+`elev_m`, `slope_deg` (latest value, or `null`) for direct map colouring.

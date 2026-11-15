@@ -1,0 +1,42 @@
+{
+  "_note": "Definitions for derived indicators. Values are written raw (counts, means, sums); the frost threshold and GDD base are documented parameters, not classifications, and are pending science-lead approval. Nothing here is invented data.",
+  "frost_days": {
+    "name_en": "Frost days",
+    "unit": "days",
+    "period": "dekad",
+    "category": "climate",
+    "aggregation": "count",
+    "method": "Number of days in the dekad whose minimum air temperature (NASA POWER T2M_MIN) is below the frost threshold.",
+    "params": { "frost_threshold_c": 0.0 },
+    "source_id": "nasa_power",
+    "product_version": "NASA POWER temporal/daily/point, community AG",
+    "resolution_m": 55000,
+    "documentation": "docs/indicators.md"
+  },
+  "gdd": {
+    "name_en": "Growing-degree days (base 10 C)",
+    "unit": "degree-days",
+    "period": "dekad",
+    "category": "climate",
+    "aggregation": "sum",
+    "method": "Sum over the dekad of max(mean daily air temperature - base, 0). Base temperature is a parameter, not a crop-specific choice.",
+    "params": { "base_temp_c": 10.0 },
+    "source_id": "nasa_power",
+    "product_version": "NASA POWER temporal/daily/point, community AG",
+    "resolution_m": 55000,
+    "documentation": "docs/indicators.md"
+  },
+  "t_mean": {
+    "name_en": "Mean air temperature",
+    "unit": "degC",
+    "period": "dekad",
+    "category": "climate",
+    "aggregation": "mean",
+    "method": "Mean over the dekad of daily mean air temperature, (T2M_MAX + T2M_MIN) / 2.",
+    "params": {},
+    "source_id": "nasa_power",
+    "product_version": "NASA POWER temporal/daily/point, community AG",
+    "resolution_m": 55000,
+    "documentation": "docs/indicators.md"
+  }
+}

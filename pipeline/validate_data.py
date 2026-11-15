@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract check for /data. Exit 1 on any violation. Run on every push (see .github/workflows)."""
 import csv
+import glob
 import json
 import os
 import re
@@ -50,6 +51,9 @@ def main():
             err(f"meta.json: non-ISO dekad {s}..{e}")
     if meta["mode"] not in ("live", "demo"):
         err("meta.json: mode must be live or demo")
+    if meta.get("contract_version") not in ("0.2", "0.3"):
+        err(f"meta.json: unexpected contract_version {meta.get('contract_version')!r}")
+    check_indicators(meta, dek)
 
     districts = load("districts.geojson")["features"]
     if len(districts) < 30:
@@ -110,6 +114,50 @@ def check_series(uid, dek, status):
         err(f"series/{uid}.json latest status {s['dekads'][-1]['status']} != polygon status {status}")
     if "generated_at" not in s or "sources" not in s:
         err(f"series/{uid}.json: missing generated_at or sources")
+
+
+def check_indicators(meta, dek):
+    """Additive v0.3: validate indicators/ and static/ when the registry exists."""
+    inds = meta.get("indicators")
+    if not inds:
+        return
+    seen = set()
+    static_files = glob.glob(os.path.join(ROOT, "static", "*.json"))
+    for ind in inds:
+        iid = ind.get("id")
+        if not iid or iid in seen:
+            err(f"meta.indicators: bad or duplicate id {iid!r}")
+            continue
+        seen.add(iid)
+        for k in ("name_en", "unit", "period", "source_id"):
+            if not ind.get(k):
+                err(f"meta.indicators[{iid}]: missing {k}")
+        if ind.get("period") == "static":
+            if not static_files:
+                err(f"indicator {iid}: period static but no data/static/*.json")
+            continue
+        files = glob.glob(os.path.join(ROOT, "indicators", iid, "*.json"))
+        if not files:
+            err(f"indicator {iid}: no files under indicators/{iid}/")
+            continue
+        for p in files:
+            s = json.load(open(p, encoding="utf-8"))
+            rel = os.path.relpath(p, ROOT)
+            if s.get("indicator") != iid:
+                err(f"{rel}: indicator {s.get('indicator')!r} != {iid!r}")
+            if not s.get("unit_id"):
+                err(f"{rel}: missing unit_id")
+            got = [(d["start"], d["end"]) for d in s.get("dekads", [])]
+            if got != dek:
+                err(f"{rel}: dekads do not match meta.json")
+            for d in s.get("dekads", []):
+                if not num_or_null(d.get("value")):
+                    err(f"{rel}: value must be a number or null")
+    for p in static_files:
+        s = json.load(open(p, encoding="utf-8"))
+        rel = os.path.relpath(p, ROOT)
+        if not s.get("unit_id") or "elevation_m" not in s:
+            err(f"{rel}: static file missing unit_id or elevation_m")
 
 
 if __name__ == "__main__":

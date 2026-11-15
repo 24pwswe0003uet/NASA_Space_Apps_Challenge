@@ -35,6 +35,13 @@ jobs:
           key: power-${{ github.run_id }}
           restore-keys: power-
 
+      - name: Restore SRTM cache
+        uses: actions/cache@v4
+        with:
+          path: pipeline/cache/srtm
+          key: srtm-${{ github.run_id }}
+          restore-keys: srtm-
+
       - name: Boundaries
         run: python3 pipeline/prepare_boundaries.py
 
@@ -46,6 +53,16 @@ jobs:
           EE_SERVICE_ACCOUNT_KEY: ${{ secrets.EE_SERVICE_ACCOUNT_KEY }}
           EE_PROJECT: kp-farm-atlas
         run: python3 pipeline/build_series.py
+
+      - name: Derived POWER indicators
+        run: python3 pipeline/power_indicators.py
+
+      - name: SRTM elevation tiles
+        timeout-minutes: 45
+        run: python3 pipeline/fetch_srtm.py
+
+      - name: Terrain statistics
+        run: python3 pipeline/terrain_stats.py
 
       - name: Validate contract
         run: python3 pipeline/validate_data.py
