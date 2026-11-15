@@ -80,10 +80,15 @@ Atlas.data = (function () {
   }
 
   // ---- Domain accessors ---------------------------------------------------
+  var seriesValue = {};
   function series(id) {
-    if (!seriesCache[id]) seriesCache[id] = getJSON('series/' + id + '.json').catch(function () { return null; });
+    if (!seriesCache[id]) seriesCache[id] = getJSON('series/' + id + '.json')
+      .then(function (s) { seriesValue[id] = s; return s; })
+      .catch(function () { seriesValue[id] = null; return null; });
     return seriesCache[id];
   }
+  // Synchronous read of a series that has already been fetched (or null).
+  function cached(id) { return seriesValue[id] || null; }
 
   function loadUCs(districtId) {
     if (!ucCache[districtId]) ucCache[districtId] = getJSON('ucs/' + districtId + '.geojson')
@@ -105,6 +110,7 @@ Atlas.data = (function () {
     snapshot: snapshot,
     fromSnapshot: fromSnapshot,
     series: series,
+    cached: cached,
     loadUCs: loadUCs,
     loadAllUCs: loadAllUCs,
     setMeta: setMeta,

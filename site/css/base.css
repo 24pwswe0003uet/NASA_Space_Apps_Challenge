@@ -3,8 +3,6 @@
 * { box-sizing: border-box; }
 /* class rules below set display on these elements, so the attribute needs priority */
 [hidden] { display: none !important; }
-/* class rules below set display on these elements, so the attribute needs priority */
-[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow-x: hidden; }
 body {
   font-family: var(--sans);

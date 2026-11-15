@@ -16,6 +16,13 @@ Atlas.config = {
   colors: { green: '#15803d', amber: '#d97706', red: '#c2250f', nodata: '#94a3b8' },
   // Cropland hectares quintile ramp (mirror --ramp-0 .. --ramp-4 in tokens.css).
   ramp: ['#eef4ea', '#cfe2c4', '#a3cb98', '#5fa86d', '#15803d'],
+  // Chart series and chrome (mirror --demand, --rain, --red, --line-2, --ink-2;
+  // Plotly cannot read CSS variables either).
+  chart: {
+    demand: '#0b3d91', rain: '#7c93ad', deficit: '#c2250f',
+    grid: '#eef1f6', zero: '#cbd5e1', ink: '#39414d',
+    font: 'Inter, system-ui, sans-serif'
+  },
 
   // Province view switches from districts to every union council at this zoom.
   detailZoom: 8,

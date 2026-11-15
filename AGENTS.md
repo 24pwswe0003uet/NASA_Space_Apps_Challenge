@@ -9,10 +9,10 @@
 | Document role | Permanent source of truth for identity, architecture, rules, roadmap, data contract, and progress |
 | Frontend owner | The user of this repository (frontend/UI lead) |
 | Roadmap | Five phases (Foundation, Core Atlas, Data Visualization, Methods/i18n, Final Integration) |
-| Last repository inspection | 2026-11-15 |
-| Last updated | 2026-11-15 |
-| Current overall progress | **~45%** (assessment) — upstream base provides the shell, map, charts, and real data; Phase 2 layer architecture refactored and verified |
-| Current status | Phase 2 in progress on the `upstream/main` base (real data, contract `mode:"live"`). Layer catalog/service refactor and province-level layer control built and verified via headless render. |
+| Last repository inspection | 2026-11-15 (Phase 3 session, `main` @ `8a11c1e`) |
+| Last updated | 2026-11-15 (Phase 3) |
+| Current overall progress | **~55%** (assessment) — Phase 3 district/UC exploration, reusable stat/chart components, adapter + export services verified in headless render; blocked on the `data/meta.json` regression for a live deploy |
+| Current status | Phase 3 implemented on `feature/phase-3-data-visualization`. **Blocker B-01:** `data/meta.json` on `main` is the proposed classification schema, not the v0.2 runtime contract, so the site cannot boot from the committed data (see §11 D-13). Frontend verified against the v0.2 file from `ff37a81`. |
 
 > **Read this file before starting any project task.**
 > This document overrides assumptions from previous sessions, prompts, branches, pull requests, chat history, and the legacy prototype. If a request conflicts with this file, stop and explain the conflict before changing architecture, scope, technology, or data claims.
@@ -278,13 +278,13 @@ The working base is `upstream/main` (`786f9a1`), which already ships a working A
 | Item | Verified state |
 |---|---|
 | Root files | `AGENTS.md`, `README.md`, `LICENSE`, plus `data/`, `docs/`, `pipeline/`, `scripts/`, `.github/` |
-| `site/` | Working Atlas: `index.html`, `methods.html`, `guide.html`, `css/style.css`, `js/*`, `strings.json` |
-| `site/js` | `app.js`, `icons.js`, `guide.js`, `methods.js`, `data-snapshot.js`, plus new `layers/`, `services/`, `components/` |
-| `data/` | Real data, contract v0.2 (`mode:"live"`): `meta.json`, `districts.geojson` (31), `ucs/` (122 tehsils), `series/`, `validation.csv` |
+| `site/` | Working Atlas: `index.html`, `methods.html`, `guide.html`, `css/{tokens,base,layout,components,responsive}.css` (the former `style.css` was split in Phase 1 v2), `js/*`, `strings.json` |
+| `site/js` | `app.js`, `icons.js`, `guide.js`, `methods.js`, `data-snapshot.js`, `config.js`, `utils.js`, `layers/catalog.js`, `services/{state,i18n,data-service,series-adapter,csv,export-service,layer-service,motion}.js`, `components/{states,legend,layer-control,temporal,stat-card,chart}.js` |
+| `data/` | Contract v0.2 (`mode:"live"`) for `districts.geojson` (31), `ucs/` (122 tehsils), `series/` (153). **`meta.json` and `validation.csv` were overwritten by merge `041ec3e` with a schema proposal and a blank template** (D-13); the v0.2 versions exist at `ff37a81` and inside `site/js/data-snapshot.js` |
 | Leaflet | Present (CDN, `1.9.4`); charts drawn without Plotly |
 | i18n / RTL | Present: `strings.json` with `en`/`ur`/`ps` and `dir` switching |
 | Deployment configuration | Present: `.github/workflows/deploy-pages.yml`; `scripts/build-site.sh`, `scripts/serve.sh` |
-| Atlas phase implementation | Phase 1 + Phase 2 substantially present; Phase 3/4 partially present (upstream) |
+| Atlas phase implementation | Phase 1 + Phase 2 present; Phase 3 implemented (this branch); Phase 4 partially present (upstream Methods/Guide) |
 
 The legacy prototype was removed on 2026-11-14. It is recorded in section 13 and earns no phase credit.
 
@@ -551,36 +551,39 @@ The roadmap describes the five planned phases. It does not mean any phase is com
 
 ### PHASE 3 — Agricultural & Environmental Data Visualization
 
-**Status:** In Progress — 45%  
+**Status:** In Progress — 80%  
 **Owner:** Frontend/UI (data and science from backend/data and validation leads)
 
 **Purpose:** Build the data exploration and analytical presentation experience.
 
 **Expected work:**
 
-- [ ] Build agricultural and environmental indicator interfaces from confirmed datasets.
-- [ ] Build dataset-specific information panels.
-- [ ] Display statistics and measurement cards with explicit units.
-- [ ] Implement time-series visualizations with Plotly where appropriate.
-- [ ] Add reporting-period controls only from confirmed metadata.
-- [ ] Display geographic and dataset metadata with each visualization.
-- [ ] Implement CSV export where supported, matching displayed data and columns.
-- [ ] Handle missing, partial, and unavailable measurements explicitly.
-- [ ] Add chart loading, empty, and error states.
-- [ ] Verify chart and table readability on mobile.
-- [ ] Ensure no scientific calculation is performed in the frontend.
+- [x] Build agricultural and environmental indicator interfaces from confirmed datasets (water balance + cropland hectares; crop-type layers shown as *Not connected*).
+- [x] Build dataset-specific information panels (district and union-council panels with identification, water balance, land, layer control, chart, exports, sources).
+- [x] Display statistics and measurement cards with explicit units (`components/stat-card.js`; units from the layer catalog / i18n).
+- [x] Implement time-series visualizations with Plotly where appropriate (`components/chart.js`, lazy-loaded, table fallback).
+- [x] Add reporting-period controls only from confirmed metadata (header dekad control, from `meta.dekads`; fixed the play/period handler crash).
+- [x] Display geographic and dataset metadata with each visualization (context line under titles; period · level · source · generated under charts).
+- [x] Implement CSV export where supported, matching displayed data and columns (`services/export-service.js`: unit time series; district union-council table for the selected period).
+- [x] Handle missing, partial, and unavailable measurements explicitly (`not_available` vs `not_connected`; partial-period notice; empty cells in CSV).
+- [x] Add chart loading, empty, and error states.
+- [x] Verify chart and table readability on mobile (390 px headless render; no horizontal overflow).
+- [x] Ensure no scientific calculation is performed in the frontend (adapter passes values through; counts of pipeline-assigned classes only).
+- [ ] Environmental indicators beyond ET/rain (soil moisture, vegetation, LST, terrain): **blocked** — no confirmed dataset or series fields (D-07).
+- [ ] Real union-council polygons (level-3 units are tehsils): **blocked** on data lead (D-04).
 
 **Completion criteria:**
 
-- [ ] Indicator views display only confirmed, real data.
-- [ ] Units, periods, sources, and geographic identifiers are accurate.
-- [ ] Time-series charts use real data and metadata dates.
-- [ ] CSV exports match displayed data and are clearly labelled.
-- [ ] Missing values render as no-data, never as zero.
-- [ ] Charts and tables are usable on phone, tablet, and desktop.
-- [ ] No fabricated thresholds, classifications, or values.
+- [x] Indicator views display only confirmed, real data.
+- [x] Units, periods, sources, and geographic identifiers are accurate (as supplied by the v0.2 contract).
+- [x] Time-series charts use real data and metadata dates.
+- [x] CSV exports match displayed data and are clearly labelled.
+- [x] Missing values render as no-data, never as zero.
+- [x] Charts and tables are usable on phone, tablet, and desktop (headless 390/900/1280 px).
+- [x] No fabricated thresholds, classifications, or values.
+- [ ] Live deployment verified — blocked by D-13 (`data/meta.json`).
 
-**Dependencies:** Confirmed datasets and metadata; backend/data contract; time-series data; CSV format agreement; scientific interpretation guidance.
+**Dependencies:** Confirmed datasets and metadata; backend/data contract; time-series data; CSV format agreement; scientific interpretation guidance. **Restoration of the v0.2 `data/meta.json` on `main` (D-13).**
 
 ---
 
@@ -670,7 +673,7 @@ The roadmap describes the five planned phases. It does not mean any phase is com
 |---|---|---|---|---|
 | Phase 1 | Foundation, Architecture & Design System | In Progress | 85% | Upstream base provides design system, shared shell, components, and i18n (en/ur/ps) with RTL; consolidated on the feature branch |
 | Phase 2 | Core Atlas & Geographic Exploration | In Progress | 60% | Map, boundaries, selection, layers, legends, and period controls present; layer catalog/service refactor and province-level layer control built and verified in headless render |
-| Phase 3 | Agricultural & Environmental Data Visualization | In Progress | 45% | Status cards, charts, series data, and CSV export present in the upstream base; requires review against the contract |
+| Phase 3 | Agricultural & Environmental Data Visualization | In Progress | 80% | District/UC exploration, reusable stat cards and chart component with states, series adapter, export service, UC identification + layer parity, context-preserving back navigation, mobile panel close; verified in headless render against v0.2 data |
 | Phase 4 | Methods, Data Sources, Validation & Multilingual Support | In Progress | 35% | Methods page, in-site guide, and three-language strings present; methodology/validation sign-off pending |
 | Phase 5 | Final Integration, Performance & QA | Not Started | 5% | GitHub Pages workflow exists; full QA, performance, and responsive verification pending |
 
@@ -678,13 +681,13 @@ The roadmap describes the five planned phases. It does not mean any phase is com
 
 | Metric | Value |
 |---|---|
-| Overall completion | **~45%** (assessment) |
-| Current active phase | Phase 2 — Core Atlas Interface & Interactive Geographic Exploration |
+| Overall completion | **~55%** (assessment) |
+| Current active phase | Phase 3 — Agricultural & Environmental Data Visualization (implementation done; awaiting PR review and D-13) |
 | Completed phases | 0 of 5 |
 | Pending phases | All five |
-| Critical issues | Responsive/keyboard and browser-console verification outstanding; production data contract and scientific sign-off still pending |
+| Critical issues | **D-13: `data/meta.json` on `main` is not the runtime contract — site crashes at boot from committed data.** Scientific sign-off and translation review pending |
 | External dependencies | See section 11 |
-| Next development priority | Finish Phase 2 verification (responsive, keyboard, RTL), then Phase 3 review against the live contract |
+| Next development priority | Get D-13 resolved by the data owner; merge the Phase 3 PR; then Phase 4 (Methods page onto the shared i18n shell, move Pearson out of `methods.js`) |
 
 Progress is calculated only from verified tasks. Percentages for Phases 1, 3, and 4 are assessments of the upstream base and have not been independently re-verified line by line; Phase 2 items were exercised in a headless render.
 
@@ -699,7 +702,7 @@ Progress is calculated only from verified tasks. Percentages for Phases 1, 3, an
 | Pending tasks | Formal cross-width verification; documented component reuse |
 | Known bugs | None observed in this phase |
 | Blockers | None for the implemented scope |
-| Relevant files | `site/index.html`, `site/methods.html`, `site/guide.html`, `site/css/style.css`, `site/js/*`, `site/strings.json` |
+| Relevant files | `site/index.html`, `site/methods.html`, `site/guide.html`, `site/css/*.css`, `site/js/*`, `site/strings.json` |
 | Next action | Verify responsive breakpoints and RTL, then close Phase 1 |
 
 ### Phase 2 tracker
@@ -713,7 +716,7 @@ Progress is calculated only from verified tasks. Percentages for Phases 1, 3, an
 | Pending tasks | Responsive/keyboard verification; dataset selection interface decision |
 | Known bugs | None observed in headless render (province, district, tehsil; status and hectare layers) |
 | Blockers | Responsive/keyboard/browser-console verification; production data contract and scientific sign-off |
-| Relevant files | `site/js/app.js`, `site/js/layers/catalog.js`, `site/js/services/layer-service.js`, `site/js/components/layer-control.js`, `site/js/components/temporal.js`, `site/index.html`, `site/strings.json`, `site/css/style.css` |
+| Relevant files | `site/js/app.js`, `site/js/layers/catalog.js`, `site/js/services/layer-service.js`, `site/js/components/layer-control.js`, `site/js/components/temporal.js`, `site/index.html`, `site/strings.json`, `site/css/*.css` |
 | Next action | Verify responsive breakpoints, keyboard navigation, and RTL; then review Phase 3 against the live contract |
 
 ### Phase 3 tracker
@@ -721,14 +724,25 @@ Progress is calculated only from verified tasks. Percentages for Phases 1, 3, an
 | Field | Value |
 |---|---|
 | Status | In Progress |
-| Progress | 45% |
-| Completed tasks | Status cards, per-district/tehsil charts, a time-series line, CSV export, and series data are present in the upstream base |
-| Partially completed tasks | Review against the live contract; chart loading/empty/error states |
-| Pending tasks | Formal review of indicator views, units, and CSV columns |
-| Known bugs | None observed in headless render |
-| Blockers | Scientific sign-off on units/periods; production data contract |
-| Relevant files | `site/js/app.js`, `site/js/methods.js`, `data/series/`, `site/strings.json` |
-| Next action | Review Phase 3 views against the live contract |
+| Progress | 80% |
+| Completed tasks | See §6 Phase 3 checklist. New modules: `site/js/services/series-adapter.js`, `site/js/services/export-service.js`, `site/js/components/stat-card.js`, `site/js/components/chart.js`. Modified: `site/js/app.js`, `site/js/config.js` (chart tokens), `site/js/services/data-service.js` (`cached()`), `site/index.html` (script tags), `site/strings.json` (+24 keys × 3 languages), `site/css/{base,layout,components,responsive}.css` |
+| Partially completed tasks | None in the frontend scope; environmental indicators other than ET/rain await data |
+| Pending tasks | Live-deploy verification (D-13); native-speaker review of the new Urdu/Pashto strings (D-10) |
+| Known bugs fixed | `setPlaying()` read `btn.firstChild.firstChild` (whitespace text node) → period select and play button threw and never changed the period; mobile Map/Details toggle sat under Leaflet's attribution (z-index) and could not be tapped; RTL basemap switcher overlapped the zoom control; duplicate CSS blocks in `base.css`/`responsive.css` |
+| Known limitations | Level-3 units are tehsils labelled "union council"; UC names are English only (`uc_name_en`) because the data carries no `uc_name_ur/ps`; `features: fc.features` drives layer availability per district; Plotly/Leaflet/fonts come from CDNs (table fallback covers charts) |
+| Blockers | D-13 (`data/meta.json`), D-05 (crop types), D-07 (further indicators), D-04 (true UC polygons) |
+| Tests executed | Headless Chrome (Playwright) against a temp copy with the v0.2 `meta.json` from `ff37a81`: province/district/UC render; list click, keyboard Enter and Escape; UC→district back keeps hash, camera and search; period select → context line, map and CSV follow; play animates; layer switch at UC level gates the period control and swaps legend; CSV series (14 lines, units in headers, `#` metadata rows) and district UC table (period in filename and columns; blank cells for missing); UC with no series → empty chart state + disabled export; series with 2 null periods → "2 of 6 periods have no measurement" + blank CSV cells; district with no UC file → notice, map fits the district, table export disabled; bad district/UC hashes fall back; Plotly CDN blocked → error state + table; 390 px phone flow (toggle, close, back, no horizontal overflow, 360 px chart); 900 px tablet no overflow; Urdu RTL; zero console/page errors except `favicon.ico` 404 |
+| Tests not executed | Real Android device; screen-reader pass; Pashto visual review; GitHub Pages deploy (blocked by D-13) |
+| Relevant files | `site/js/app.js`, `site/js/services/series-adapter.js`, `site/js/services/export-service.js`, `site/js/components/stat-card.js`, `site/js/components/chart.js`, `site/js/components/{legend,layer-control,temporal,states}.js`, `site/js/layers/catalog.js`, `site/strings.json`, `site/css/*` |
+| Next action | Data owner restores the v0.2 runtime `data/meta.json` + `validation.csv` (D-13); frontend owner opens the PR from `feature/phase-3-data-visualization` |
+
+#### Phase 3 architecture notes
+
+- **Navigation.** Hash routes `#<district_id>` / `#<uc_id>`; `openProvince()`, `openDistrict(id, {keepView, showPanel})`, `openUC(did, ucId)` in `app.js` own the level, breadcrumbs (`aria-current`), Escape and the mobile close/back controls. `backToDistrict()` keeps camera, search text, period and layer. `ensureUCs()` redraws the union-council layer only when district, period, layer, basemap or labels changed; otherwise it just moves the selection highlight (`SELECTED_STYLE`). UC boundaries are loaded per district (`data.loadUCs`) and cached.
+- **Charts.** `Atlas.components.chart.render(node, spec)` is the single renderer: it lazy-loads Plotly from `config.plotlyUrl`, shows loading/empty/partial/error states, falls back to a `<table>` when Plotly cannot load, purges previous plots and prints a metadata footer. Specs are built in `app.js` (`waterBalanceSpec`, `provinceTrend`) from adapter output; colours come from `config.chart` (mirrors `tokens.css`).
+- **Adapter boundary.** `Atlas.adapters` (`series-adapter.js`) is the only module besides `data-service.js` that reads contract field names (`dekads[].et_mm/rain_mm/deficit_mm/status`, `*_ha`, `meta.sources`). It returns periods, points, `missing/total/complete/empty`, measurement lists with `availability ∈ {live, not_connected, missing}`, identity and source lists. Nulls stay null.
+- **CSV.** `Atlas.exporter` (`export-service.js`) builds row matrices (`seriesRows`, `districtTableRows`) with units in column names, ISO periods, stable IDs and `#` metadata rows, then calls `Atlas.csv.download`; it returns `{ok, reason}` so buttons show *Export failed* rather than a false success, and are disabled when there is nothing to export.
+- **Stat components.** `Atlas.components.stats` (`stat-card.js`): `grid()/card()` for primary measurements, `rows()` compact list for identification/secondary values, `metaLine()` for context lines, `fromMeasurements()` to format adapter output.
 
 ### Phase 4 tracker
 
@@ -845,8 +859,8 @@ An Atlas implementation now exists on the `upstream/main` base. Items below are 
 - [x] Available charts work.
 - [ ] Methods and Data Sources page works.
 - [x] Navigation works.
-- [ ] Language switching works.
-- [ ] CSV exports work where supported.
+- [x] Language switching works (en/ur/ps switched in headless render; RTL applied).
+- [x] CSV exports work where supported (headless download verified, Phase 3).
 
 **Status:** Partially verified — province, district, and tehsil views exercised in a headless render with real data.
 
@@ -904,7 +918,7 @@ An Atlas implementation now exists on the `upstream/main` base. Items below are 
 
 ---
 
-## 10. Instructions for Future OpenCode Sessions
+## 10. Instructions for future agent sessions
 
 1. Read the root `AGENTS.md` before starting any project task.
 2. Understand the current architecture before changing code.
@@ -962,6 +976,7 @@ When completing meaningful work:
 | D-10 | Urdu and Pashto translation review | Phase 4 | Risk of poor or inconsistent translations | Translation reviewer | Open |
 | D-11 | GitHub Pages/hosting confirmation | Phase 5 | Deployment path unverified | Team/deployment owner | Open |
 | D-12 | Licensing and usage restrictions for selected datasets | Phase 2–4 | Possible legal or attribution problems | Data lead | Open |
+| D-13 | Restore the v0.2 runtime `data/meta.json` and `data/validation.csv` on `main` (overwritten by merge `041ec3e` with the proposed classification schema and a blank template; `pipeline/validate_data.py` fails with `KeyError: 'dekads'`, `app.js` throws at boot, and `build-site.sh` would bake the broken file into the offline snapshot) | Phase 2–5 | Site cannot boot from committed data; Pages deploy would ship broken | Backend/data lead | **Open — blocking** |
 
 Update a row to `Resolved` only when the real artifact has been received and inspected.
 
@@ -1011,6 +1026,8 @@ The legacy files have been removed, so Phase 1 implementation may proceed. Do no
 | 2026-11-15 | Base pivot: adopted `upstream/main` (advanced 8 commits) as the working base; upstream provides a working Atlas, real data (`data/`, contract v0.2, `mode:"live"`), docs, pipeline, and deploy scripts. Committed prior Phase 2 work as a checkpoint on `feature/phase-2-atlas-map` and preserved it on `feature/phase-2-legacy-foundation`. | OpenCode, on behalf of the frontend owner |
 | 2026-11-15 | Phase 2 refactor-and-extend on `feature/phase-2-atlas-v2`: added `site/js/layers/catalog.js` (single source of truth for layers/categories/availability), `site/js/services/layer-service.js` (`window.AtlasLayers`), `site/js/components/layer-control.js`, and `site/js/components/temporal.js`; wired `site/js/app.js` to the catalog, added a province-level layer control, ramp legends for continuous layers, and period-control gating for static layers; extended `site/strings.json` (en/ur/ps) and `site/css/style.css`. | OpenCode, on behalf of the frontend owner |
 | 2026-11-15 | Verified Phase 2 in a headless render: province, district, and tehsil views render with real data; grouped layer chips (3 categories, unavailable layers disabled); status legend and continuous-layer ramp legend; period control disabled for static layers. Fixed two bugs found in review: `state.layer` now initialises from the catalog default, and province/district/tehsil legends receive the ramp breaks. Updated `AGENTS.md` to reflect the new base and Phase 2 status. | OpenCode, on behalf of the frontend owner |
+| 2026-11-15 | Repository review before Phase 3 found that merge `041ec3e` replaced the v0.2 runtime `data/meta.json`/`validation.csv` with a schema proposal and a template; registered as D-13. Corrected stale `style.css` references. | Claude, on behalf of the frontend owner |
+| 2026-11-15 | Phase 3 on `feature/phase-3-data-visualization` (frontend scope only, no `data/` changes): added `services/series-adapter.js`, `services/export-service.js`, `components/stat-card.js`, `components/chart.js`; rewired `app.js` (UC identification block, layer control at UC level, context lines, `ensureUCs()` selection without redraw, `backToDistrict()` context preservation, panel error state, no-boundary state, export buttons with disabled/failed states, mobile close/back); `config.chart` tokens; `data.cached()`; 24 new strings × 3 languages; CSS for measures/meta-line/chart states/panel-close; fixed play/period handler crash, mobile toggle stacking, RTL control overlap, duplicate CSS. Verified in headless Chrome (see Phase 3 tracker). | Claude, on behalf of the frontend owner |
 
 ---
 

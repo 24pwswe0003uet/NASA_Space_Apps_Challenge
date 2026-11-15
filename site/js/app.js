@@ -7,9 +7,12 @@
 
   // Shared modules own the URLs, helpers, state and data access.
   var cfg = window.Atlas.config, util = window.Atlas.util, data = window.Atlas.data;
-  var i18n = window.Atlas.i18n, state = window.Atlas.state, csv = window.Atlas.csv;
+  var i18n = window.Atlas.i18n, state = window.Atlas.state;
   var motion = window.Atlas.motion;
+  // Adapter turns contract payloads into UI shapes; exporter builds CSV matrices.
+  var A = window.Atlas.adapters, exporter = window.Atlas.exporter;
   var states = window.Atlas.components.states, legend = window.Atlas.components.legend;
+  var Stats = window.Atlas.components.stats, Chart = window.Atlas.components.chart;
   // Layer catalog + helpers live in js/layers and js/services; the map reads them
   // instead of hardcoding which layers exist.
   var Layers = window.AtlasLayers, LayerControl = window.AtlasLayerControl, Temporal = window.AtlasTemporal;
@@ -23,7 +26,7 @@
   function nameOf(p) { return i18n.name(p); }
 
   var meta = null, districts = null;
-  var map, districtLayer = null, ucLayer = null, plotlyPromise = null, firstFit = true;
+  var map, districtLayer = null, ucLayer = null, ucLayerKey = null, firstFit = true;
   var baseLayers = {}, labelOverlay = null, activeBase = localStorage.getItem('atlas.base') || 'light';
   var showLabels = localStorage.getItem('atlas.labels') !== 'off';
   var provinceStatuses = null;
@@ -70,11 +73,16 @@
     });
   }
 
-  function dekadAt(ser, i) {
-    if (!ser || !ser.dekads || !ser.dekads[i]) return { status: 'nodata', deficit_mm: null, et_mm: null, rain_mm: null };
-    return ser.dekads[i];
-  }
+  function dekadAt(ser, i) { return A.waterBalanceAt(ser, i, null, false); }
   function isLatest() { return state.dekadIndex === meta.dekads.length - 1; }
+  function currentPeriod() {
+    var d = meta.dekads[state.dekadIndex];
+    return { index: state.dekadIndex, start: d.start, end: d.end, isLatest: isLatest() };
+  }
+  function levelLabel(level) { return t(level === 'uc' ? 'level_uc' : 'level_district'); }
+  // The key that decides whether the union-council layer must be redrawn:
+  // same district, period and map layer means only the selection changes.
+  function ucKey(did) { return did + '|' + state.dekadIndex + '|' + state.layer + '|' + activeBase + '|' + showLabels; }
   function hasCropType() { return meta.sources.crop_type && meta.sources.crop_type.status === 'live'; }
   function demandLabel() { return meta.et_method === 'wapor_aeti' ? t('demand_actual') : t('demand_ref'); }
   function currentLayer() { return Layers.resolve(state.layer); }
@@ -251,7 +259,8 @@
     return breaks;
   }
 
-  function drawUCs(fc, statusById) {
+  var SELECTED_STYLE = { color: '#0f141b', weight: 2.8, fillOpacity: 0.92 };
+  function drawUCs(fc, statusById, did) {
     if (ucLayer) map.removeLayer(ucLayer);
     var layer = currentLayer();
     var status = layer.id === 'status';
@@ -271,16 +280,34 @@
           : (p[layer.id] == null ? '' : fmtInt(p[layer.id]) + ' ' + layerUnit(layer));
         addLabel(lyr, '<span class="ml-n">' + p.uc_name_en + '</span>' +
           (val ? '<span class="ml-v">' + val + '</span>' : ''));
-        hoverable(lyr, function () {
+        var base = function () {
           return status ? styleFor(st, false) : rampStyle(haColor(p[layer.id], breaks), false);
-        });
+        };
+        lyr._atlasBase = base;
+        hoverable(lyr, function () { return state.ucId === p.uc_id ? SELECTED_STYLE : base(); });
         lyr.on('click', function () { openUC(p.district_id, p.uc_id); });
-        if (state.ucId === p.uc_id) lyr.setStyle({ color: '#0f141b', weight: 2.8, fillOpacity: 0.92 });
+        if (state.ucId === p.uc_id) lyr.setStyle(SELECTED_STYLE);
       }
     }).addTo(map);
+    ucLayer._atlasBreaks = breaks;
+    ucLayerKey = did ? ucKey(did) : null;
     ucLayer.bringToFront();
     updateLabels();
     return breaks;
+  }
+  // Redraw the union councils only when district, period or layer changed;
+  // otherwise just move the selection highlight. Returns the ramp breaks.
+  function ensureUCs(did, fc, statusById) {
+    if (ucLayer && ucLayerKey === ucKey(did)) {
+      ucLayer.eachLayer(function (lyr) {
+        var p = lyr.feature.properties;
+        if (!lyr._atlasBase) return;
+        lyr.setStyle(state.ucId === p.uc_id ? SELECTED_STYLE : lyr._atlasBase());
+        if (state.ucId === p.uc_id && lyr.bringToFront) lyr.bringToFront();
+      });
+      return ucLayer._atlasBreaks;
+    }
+    return drawUCs(fc, statusById, did);
   }
 
   function statusesFor(features, idKey) {
@@ -339,10 +366,12 @@
     inner.appendChild(el('div', { 'class': 'crumbs' }, [el('span', { 'class': 'here', text: t('province') })]));
     inner.appendChild(el('div', { 'class': 'title-row' }, [el('h1', { text: t('province') })]));
     inner.appendChild(el('p', { 'class': 'sub', text: t('province_sub', { dekad: dekadLabel(meta.dekads[state.dekadIndex]) }) }));
+    inner.appendChild(contextLine(null));
 
     var counts = { green: 0, amber: 0, red: 0, nodata: 0 };
     districts.features.forEach(function (f) {
-      counts[statusById ? statusById[f.properties.district_id] : f.properties.status]++;
+      var st = statusById ? statusById[f.properties.district_id] : f.properties.status;
+      counts[st in counts ? st : 'nodata']++;
     });
     inner.appendChild(el('h2', {}, [icon('droplet'), document.createTextNode(t('summary_title'))]));
     var grid = el('div', { 'class': 'stats' });
@@ -386,75 +415,107 @@
     inner.appendChild(sourcesBlock());
   }
 
+  // Counts of districts per status for every period. Counting classes the
+  // pipeline already assigned is presentation, not a scientific calculation.
   function provinceTrend(node) {
+    var loading = el('div', { 'class': 'chart-state loading', role: 'status' }, [
+      el('span', { 'class': 'spinner' }), el('span', { text: t('chart_loading') })]);
+    node.appendChild(loading);
     Promise.all(districts.features.map(function (f) { return series(f.properties.district_id); }))
       .then(function (all) {
         var counts = meta.dekads.map(function () { return { green: 0, amber: 0, red: 0, nodata: 0 }; });
         var got = 0;
         all.forEach(function (ser) {
-          if (!ser || !ser.dekads) return;
+          var wb = A.waterBalance(ser, meta);
+          if (!wb) return;
           got++;
-          ser.dekads.forEach(function (d, i) { if (counts[i]) counts[i][d.status]++; });
+          wb.points.forEach(function (d, i) { if (counts[i]) counts[i][d.status in counts[i] ? d.status : 'nodata']++; });
         });
-        if (!got) { node.replaceWith(el('p', { 'class': 'hint', text: t('no_series') })); return; }
+        if (!got) { Chart.render(node, null); return; }
         var x = meta.dekads.map(function (d) { return fmtDate(d.start); });
-        var bar = function (key, color) {
-          return { type: 'bar', name: t('status_' + key), x: x,
-                   y: counts.map(function (c) { return c[key]; }), marker: { color: color },
-                   hovertemplate: '%{y} ' + t('districts_word') + '<extra>' + t('status_' + key) + '</extra>' };
+        var bar = function (key) {
+          return { key: key, name: t('status_' + key), kind: 'bar', color: COLORS[key],
+                   values: counts.map(function (c) { return c[key]; }),
+                   hover: '%{y} ' + t('districts_word') };
         };
-        loadPlotly().then(function () {
-          Plotly.newPlot(node, [bar('red', COLORS.red), bar('amber', COLORS.amber),
-                                bar('green', COLORS.green), bar('nodata', COLORS.nodata)], {
-            barmode: 'stack', height: 180, margin: { l: 30, r: 8, t: 4, b: 26 },
-            legend: { orientation: 'h', y: 1.3, x: 0, font: { size: 10 } },
-            yaxis: { gridcolor: '#eef1f6', fixedrange: true },
-            xaxis: { tickfont: { size: 10 }, fixedrange: true },
-            paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-            font: { family: 'Inter, system-ui, sans-serif', color: '#39414d' }
-          }, { displayModeBar: false, responsive: true });
-        }).catch(function () {
-          var tbl = el('table', { 'class': 'chart-table' });
-          tbl.appendChild(el('tr', {}, [el('th', { text: t('dekad') }), el('th', { text: t('status_red') }),
-            el('th', { text: t('status_amber') }), el('th', { text: t('status_green') })]));
-          counts.forEach(function (c, i) {
-            tbl.appendChild(el('tr', {}, [el('td', { text: dekadLabel(meta.dekads[i]) }),
-              el('td', { text: c.red }), el('td', { text: c.amber }), el('td', { text: c.green })]));
-          });
-          node.replaceWith(tbl);
+        Chart.render(node, {
+          x: x, series: [bar('red'), bar('amber'), bar('green'), bar('nodata')],
+          unit: t('districts_word'), barmode: 'stack', height: 180, yTitle: false,
+          missing: districts.features.length - got, total: districts.features.length,
+          partialText: t('partial_units', { n: districts.features.length - got, total: districts.features.length }),
+          meta: { period: dekadLabel(meta.dekads[0]).split(' – ')[0] + ' – ' + fmtDate(meta.dekads[meta.dekads.length - 1].end),
+                  level: t('level_province') },
+          tableHead: [t('dekad'), t('status_red'), t('status_amber'), t('status_green'), t('status_nodata')],
+          tableRows: counts.map(function (c, i) { return [dekadLabel(meta.dekads[i]), c.red, c.amber, c.green, c.nodata]; })
         });
       });
   }
 
   // ------------------------------------------------------------------ district
-  function openDistrict(did, keepView) {
+  // opts: { keepView: keep the camera and search text, showPanel: force the
+  //         panel open (used when stepping back from a union council on a phone) }
+  function openDistrict(did, opts) {
+    opts = typeof opts === 'boolean' ? { keepView: opts } : (opts || {});
+    var keepView = !!opts.keepView;
+    var dFeature = districts.features.filter(function (f) { return f.properties.district_id === did; })[0];
+    if (!dFeature) { openProvince(); return; }
     state.level = 'district'; state.districtId = did; state.ucId = null;
     if (!keepView) state.query = '';
     setLoading(true);
-    var dFeature = districts.features.filter(function (f) { return f.properties.district_id === did; })[0];
     Promise.all([loadUCs(did), series(did)]).then(function (res) {
       var fc = res[0], dser = res[1];
       return statusesFor(fc.features, 'uc_id').then(function (st) {
         drawDistricts(null);
-        var breaks = drawUCs(fc, st);
+        var breaks = ensureUCs(did, fc, st);
         if (!keepView && !state.playing && ucLayer.getLayers().length) fit(ucLayer.getBounds(), 24);
+        else if (!ucLayer.getLayers().length && !keepView) fit(L.geoJSON(dFeature).getBounds(), 24);
         renderLegend(breaks);
         renderDistrict(dFeature, fc, dser, st);
-        if (!keepView) showPanel(true);
+        if (!keepView || opts.showPanel) showPanel(true);
         setLoading(false);
       });
+    }).catch(function (err) {
+      setLoading(false);
+      panelError(err);
     });
     history.replaceState(null, '', '#' + did);
+  }
+
+  // One line under a title: active layer, selected period, data timestamp.
+  function contextLine(ser) {
+    return Stats.metaLine([
+      t(currentLayer().nameKey),
+      Layers.isTemporal(currentLayer().id) ? dekadLabel(meta.dekads[state.dekadIndex]) : null,
+      t('generated', { ts: stamp((ser && ser.generated_at) || meta.generated_at) })
+    ]);
+  }
+
+  // Shown inside the panel when a view cannot be built; the map stays usable.
+  function panelError(err) {
+    var inner = panelShell();
+    inner.appendChild(el('div', { 'class': 'crumbs' }, [
+      el('button', { onclick: function () { openProvince(); } }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))])]));
+    inner.appendChild(el('div', { 'class': 'chart-state error', role: 'alert' }, [icon('alert', 'icon-sm'),
+      el('span', { text: t('view_error') })]));
+    if (err && err.message) inner.appendChild(el('p', { 'class': 'hint', text: String(err.message) }));
+  }
+
+  function noBoundariesNotice() {
+    return el('div', { 'class': 'notice' }, [icon('info', 'icon-sm'),
+      el('span', { text: t('no_uc_boundaries') })]);
   }
 
   function renderDistrict(dFeature, fc, dser, statusById) {
     var p = dFeature.properties, inner = panelShell();
     inner.appendChild(el('div', { 'class': 'crumbs' }, [
       el('button', { onclick: function () { openProvince(); } }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))]),
-      el('span', { 'class': 'here', text: nameOf(p) })]));
+      el('span', { 'class': 'here', 'aria-current': 'page', text: nameOf(p) })]));
     inner.appendChild(el('div', { 'class': 'title-row' }, [el('h1', { text: nameOf(p) })]));
-    inner.appendChild(el('p', { 'class': 'sub', text: t('district_sub', { n: fc.features.length }) }));
+    inner.appendChild(el('p', { 'class': 'sub', text: fc.features.length
+      ? t('district_sub', { n: fc.features.length }) : t('district_sub_none') }));
+    inner.appendChild(contextLine(dser));
 
+    inner.appendChild(el('h2', {}, [icon('droplet'), document.createTextNode(t('water_title'))]));
     inner.appendChild(statusCard(currentFor(dser, p), p));
     inner.appendChild(el('h2', {}, [icon('sprout'), document.createTextNode(t('land_title'))]));
     inner.appendChild(hectares(p));
@@ -468,9 +529,15 @@
     inner.appendChild(el('h2', {}, [icon('chart'), document.createTextNode(t('chart_title'))]));
     var dchart = el('div', { 'class': 'chart' });
     inner.appendChild(dchart);
-    renderChart(dchart, dser);
+    renderChart(dchart, dser, 'district');
 
     inner.appendChild(el('h2', {}, [icon('map'), document.createTextNode(t('ucs_title', { n: fc.features.length }))]));
+    if (!fc.features.length) {
+      inner.appendChild(noBoundariesNotice());
+      inner.appendChild(actions({ ser: dser, id: p.district_id, label: p.name_en, fc: fc, props: p }));
+      inner.appendChild(sourcesBlock(dser));
+      return;
+    }
     inner.appendChild(searchBox());
     var layer = currentLayer();
     var status = layer.id === 'status';
@@ -491,12 +558,14 @@
     if (!rows.length) list.appendChild(el('li', { 'class': 'hint', text: t('no_match') }));
     inner.appendChild(list);
     inner.appendChild(el('p', { 'class': 'hint', text: t('tap_uc') }));
-    inner.appendChild(actions(dser, p.district_id, nameOf(p)));
+    inner.appendChild(actions({ ser: dser, id: p.district_id, label: p.name_en, fc: fc, props: p,
+      statusById: statusById }));
     inner.appendChild(sourcesBlock(dser));
   }
 
   // ------------------------------------------------------------------ union council
   function openUC(did, ucId) {
+    var prevLevel = state.level;
     state.level = 'uc'; state.districtId = did; state.ucId = ucId;
     setLoading(true);
     Promise.all([loadUCs(did), series(ucId)]).then(function (res) {
@@ -504,27 +573,49 @@
       var f = fc.features.filter(function (x) { return x.properties.uc_id === ucId; })[0];
       if (!f) { openDistrict(did); return; }
       return statusesFor(fc.features, 'uc_id').then(function (st) {
-        renderLegend(drawUCs(fc, st));
-        renderUC(f, ser);
+        if (!districtLayer) drawDistricts(null);
+        renderLegend(ensureUCs(did, fc, st));
+        renderUC(f, ser, fc);
         showPanel(true);
         var layer = ucLayer.getLayers().filter(function (l) { return l.feature.properties.uc_id === ucId; })[0];
-        if (layer && window.innerWidth > 820) fit(layer.getBounds(), 48);
+        // Only move the camera when arriving from another level; a period or
+        // layer change inside the same union council keeps the view.
+        if (layer && window.innerWidth > cfg.breakpoints.mobile && prevLevel !== 'uc') fit(layer.getBounds(), 48);
         setLoading(false);
       });
+    }).catch(function (err) {
+      setLoading(false);
+      panelError(err);
     });
     history.replaceState(null, '', '#' + ucId);
   }
 
-  function renderUC(f, ser) {
+  // Back from a union council to its district: keep the camera, the search
+  // text, the period and the layer; on a phone make sure the panel is visible.
+  function backToDistrict(did) { openDistrict(did, { keepView: true, showPanel: true }); }
+
+  function renderUC(f, ser, fc) {
     var p = f.properties, inner = panelShell();
+    var id = A.identity(p, 'uc');
     inner.appendChild(el('div', { 'class': 'crumbs' }, [
       el('button', { onclick: function () { openProvince(); } }, [icon('chevron-left', 'icon-sm'), document.createTextNode(t('province'))]),
       icon('chevron-right', 'icon-sm'),
-      el('button', { onclick: function () { openDistrict(p.district_id); } }, [document.createTextNode(nameOf(p))]),
-      el('span', { 'class': 'here', text: p.uc_name_en })]));
+      el('button', { onclick: function () { backToDistrict(p.district_id); } }, [document.createTextNode(nameOf(p))]),
+      el('span', { 'class': 'here', 'aria-current': 'page', text: p.uc_name_en })]));
     inner.appendChild(el('div', { 'class': 'title-row' }, [el('h1', { text: p.uc_name_en })]));
     inner.appendChild(el('p', { 'class': 'sub', text: t('uc_sub', { district: nameOf(p) }) }));
+    inner.appendChild(contextLine(ser));
 
+    inner.appendChild(el('h2', {}, [icon('info'), document.createTextNode(t('identification'))]));
+    inner.appendChild(Stats.rows([
+      { label: t('id_label'), value: id.id, availability: 'missing' },
+      { label: t('district_label'), value: nameOf(p), availability: 'missing' },
+      { label: t('level_label'), value: t('level_uc'), availability: 'missing' },
+      { label: t('period_label'), value: dekadLabel(meta.dekads[state.dekadIndex]), availability: 'missing' }
+    ]));
+    inner.appendChild(el('p', { 'class': 'hint', text: t('unit_note') }));
+
+    inner.appendChild(el('h2', {}, [icon('droplet'), document.createTextNode(t('water_title'))]));
     inner.appendChild(statusCard(currentFor(ser, p), p));
     inner.appendChild(trendLine(ser));
 
@@ -532,29 +623,36 @@
     inner.appendChild(hectares(p));
     if (!hasCropType()) inner.appendChild(cropTypeNotice());
 
+    inner.appendChild(el('h2', {}, [icon('layers'), document.createTextNode(t('layers'))]));
+    inner.appendChild(LayerControl.render({
+      currentId: currentLayer().id, meta: meta, features: fc.features, t: t, onSelect: setLayer
+    }));
+
     inner.appendChild(el('h2', {}, [icon('chart'), document.createTextNode(t('chart_title'))]));
     var chart = el('div', { 'class': 'chart' });
     inner.appendChild(chart);
-    renderChart(chart, ser);
-    inner.appendChild(actions(ser, p.uc_id, p.uc_name_en));
+    renderChart(chart, ser, 'uc');
+    inner.appendChild(actions({ ser: ser, id: p.uc_id, label: p.uc_name_en, props: p }));
     inner.appendChild(sourcesBlock(ser));
+    inner.appendChild(el('div', { 'class': 'panel-back' }, [
+      el('button', { 'class': 'btn ghost', type: 'button', onclick: function () { backToDistrict(p.district_id); } },
+        [icon('chevron-left', 'icon-sm'), document.createTextNode(t('back_to_district', { district: nameOf(p) }))])]));
   }
 
   // ------------------------------------------------------------------ pieces
   function panelShell() {
     var panel = qs('panel');
     panel.innerHTML = '';
+    // phone only (hidden by CSS on wider screens): return to the map
+    panel.appendChild(el('button', { 'class': 'panel-close', type: 'button', 'aria-label': t('show_map'),
+      onclick: function () { showPanel(false); } }, [icon('close', 'icon-sm')]));
     var inner = el('div', { 'class': 'panel-inner' });
     panel.appendChild(inner);
     panel.scrollTop = 0;
     motion.reveal(inner);
     return inner;
   }
-  function currentFor(ser, p) {
-    var cur = dekadAt(ser, state.dekadIndex);
-    if (isLatest() && !ser) return { status: p.status, deficit_mm: p.deficit_mm, et_mm: p.et_mm, rain_mm: p.rain_mm };
-    return cur;
-  }
+  function currentFor(ser, p) { return A.waterBalanceAt(ser, state.dekadIndex, p, isLatest()); }
   function matchQuery(getter) {
     var q = state.query.trim().toLowerCase();
     return function (f) { return !q || getter(f.properties).toLowerCase().indexOf(q) >= 0; };
@@ -644,15 +742,7 @@
       el('span', { text: run >= 2 ? t('trend_up', { n: run + 1 }) : run === 1 ? t('trend_up_one') : t('trend_flat') })]);
   }
   function hectares(p) {
-    var grid = el('div', { 'class': 'stats' });
-    Layers.continuous().forEach(function (L2) {
-      var v = p[L2.id], has = v != null;
-      grid.appendChild(el('div', { 'class': 'stat' + (has ? '' : ' empty') }, [
-        el('div', { 'class': 'k' }, [icon(L2.icon, 'icon-sm'), document.createTextNode(t(L2.nameKey))]),
-        has ? el('div', { 'class': 'v num' }, [document.createTextNode(fmtInt(v)), el('small', { text: ' ' + layerUnit(L2) })])
-            : el('div', { 'class': 'v', text: t('not_connected') })]));
-    });
-    return grid;
+    return Stats.grid(Stats.fromMeasurements(A.measurements(p, meta)));
   }
   function cropTypeNotice() {
     return el('div', { 'class': 'notice' }, [icon('info', 'icon-sm'),
@@ -676,87 +766,90 @@
     });
     return btn;
   }
-  function actions(ser, id, label) {
-    return el('div', { 'class': 'actions' }, [
-      el('button', { 'class': 'btn', type: 'button', onclick: function () { downloadCSV(ser, id, label); } },
-        [icon('download', 'icon-sm'), document.createTextNode(t('download_csv'))]),
-      el('a', { 'class': 'btn ghost', download: '',
-        href: DATA() + (state.level === 'uc' ? 'ucs/' + state.districtId + '.geojson' : 'districts.geojson') },
-        [icon('download', 'icon-sm'), document.createTextNode(t('download_geojson'))]),
-      shareButton()]);
+  // A download button that is disabled when there is nothing to export and
+  // reports a failed export instead of pretending it worked.
+  function exportButton(labelKey, rows, filename, ghost) {
+    var label = el('span', { text: t(labelKey) });
+    var btn = el('button', { 'class': 'btn' + (ghost ? ' ghost' : ''), type: 'button' },
+      [icon('download', 'icon-sm'), label]);
+    if (!rows) {
+      btn.disabled = true;
+      btn.setAttribute('title', t('export_unavailable'));
+      return btn;
+    }
+    btn.addEventListener('click', function () {
+      var res = exporter.download(filename, rows);
+      if (res.ok) return;
+      label.textContent = t('export_failed');
+      btn.classList.add('failed');
+      setTimeout(function () { label.textContent = t(labelKey); btn.classList.remove('failed'); }, 2500);
+    });
+    return btn;
+  }
+  // ctx: { ser, id, label, props, fc (district only), statusById }
+  function actions(ctx) {
+    var box = el('div', { 'class': 'actions' });
+    box.appendChild(exportButton('download_csv',
+      exporter.seriesRows(ctx.ser, meta, ctx.id, ctx.label), exporter.seriesFilename(ctx.id)));
+    if (ctx.fc) {
+      var period = currentPeriod();
+      var seriesById = {};
+      // district table uses the series already cached for the current period
+      ctx.fc.features.forEach(function (f) {
+        var cached = data.cached(f.properties.uc_id);
+        if (cached) seriesById[f.properties.uc_id] = cached;
+      });
+      box.appendChild(exportButton('download_uc_table',
+        exporter.districtTableRows(ctx.fc, meta, ctx.props, period, ctx.statusById, seriesById),
+        exporter.tableFilename(ctx.id, period), true));
+    }
+    box.appendChild(el('a', { 'class': 'btn ghost', download: '',
+      href: DATA() + (state.level === 'uc' ? 'ucs/' + state.districtId + '.geojson' : 'districts.geojson') },
+      [icon('download', 'icon-sm'), document.createTextNode(t('download_geojson'))]));
+    box.appendChild(shareButton());
+    return box;
   }
   function sourcesBlock(ser) {
     var box = el('div', { 'class': 'sources' });
     box.appendChild(el('div', {}, [el('b', { text: t('sources') })]));
-    ['cropland', 'crop_type', 'water_demand', 'rain', 'boundaries'].forEach(function (k) {
-      var s = meta.sources[k];
-      if (!s) return;
-      var off = s.status !== 'live';
-      box.appendChild(el('div', { 'class': 'src' + (off ? ' off' : '') }, [
-        icon(off ? 'close' : 'check', 'icon-sm'),
-        el('span', { text: s.name + (off ? ' — ' + t('not_connected') : '') })]));
+    A.sources(meta).forEach(function (s) {
+      box.appendChild(el('div', { 'class': 'src' + (s.live ? '' : ' off') }, [
+        icon(s.live ? 'check' : 'close', 'icon-sm'),
+        el('span', { text: s.name + (s.live ? '' : ' — ' + t('not_connected')) })]));
     });
     box.appendChild(el('div', { 'class': 'stamp', text: t('generated', { ts: stamp((ser && ser.generated_at) || meta.generated_at) }) }));
     return box;
   }
 
   // ------------------------------------------------------------------ chart
-  function loadPlotly() {
-    if (window.Plotly) return Promise.resolve();
-    if (!plotlyPromise) plotlyPromise = new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = cfg.plotlyUrl;
-      s.onload = resolve; s.onerror = reject;
-      document.head.appendChild(s);
-    });
-    return plotlyPromise;
+  // Builds the ET-versus-rain spec for one unit and hands it to the chart
+  // component. The spec carries only values the series supplies.
+  function waterBalanceSpec(ser, level) {
+    var wb = A.waterBalance(ser, meta);
+    if (!wb) return null;
+    var x = wb.periods.map(function (d) { return fmtDate(d.start); });
+    var first = wb.periods[0], last = wb.periods[wb.periods.length - 1];
+    return {
+      x: x,
+      series: [
+        { key: 'et', name: t('et'), kind: 'bar', color: cfg.chart.demand, values: wb.points.map(function (p) { return p.et_mm; }) },
+        { key: 'rain', name: t('rain'), kind: 'bar', color: cfg.chart.rain, values: wb.points.map(function (p) { return p.rain_mm; }) },
+        { key: 'deficit', name: t('deficit'), kind: 'line', color: cfg.chart.deficit, values: wb.points.map(function (p) { return p.deficit_mm; }) }
+      ],
+      unit: t('mm'), missing: wb.missing, total: wb.total,
+      meta: {
+        period: first && last ? fmtDate(first.start) + ' – ' + fmtDate(last.end) : null,
+        level: levelLabel(level),
+        source: wb.et_method === 'wapor_aeti' ? t('demand_actual') : t('demand_ref'),
+        generated: wb.generated_at ? stamp(wb.generated_at) : null
+      },
+      tableHead: [t('dekad'), t('et'), t('rain'), t('deficit')],
+      tableRows: wb.points.map(function (p) { return [dekadLabel(p), fmtMm(p.et_mm), fmtMm(p.rain_mm), fmtMm(p.deficit_mm)]; })
+    };
   }
-  function renderChart(node, ser) {
-    if (!ser) { node.replaceWith(el('p', { 'class': 'hint', text: t('no_series') })); return; }
-    var x = ser.dekads.map(function (d) { return fmtDate(d.start); });
-    loadPlotly().then(function () {
-      Plotly.newPlot(node, [
-        { type: 'bar', name: t('et'), x: x, y: ser.dekads.map(function (d) { return d.et_mm; }),
-          marker: { color: '#0b3d91' }, hovertemplate: '%{y:.1f} mm<extra>' + t('et') + '</extra>' },
-        { type: 'bar', name: t('rain'), x: x, y: ser.dekads.map(function (d) { return d.rain_mm; }),
-          marker: { color: '#9fb3c8' }, hovertemplate: '%{y:.1f} mm<extra>' + t('rain') + '</extra>' },
-        { type: 'scatter', mode: 'lines+markers', name: t('deficit'),
-          x: x, y: ser.dekads.map(function (d) { return d.deficit_mm; }),
-          line: { color: '#c2250f', width: 2 }, marker: { size: 6 },
-          hovertemplate: '%{y:.1f} mm<extra>' + t('deficit') + '</extra>' }
-      ], {
-        barmode: 'group', height: 236, margin: { l: 38, r: 10, t: 6, b: 30 },
-        legend: { orientation: 'h', y: 1.18, x: 0, font: { size: 11 } },
-        yaxis: { title: { text: t('mm'), font: { size: 11 } }, gridcolor: '#eef1f6', zerolinecolor: '#cbd5e1' },
-        xaxis: { tickfont: { size: 10 } }, hovermode: 'x unified',
-        paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { family: 'Inter, system-ui, sans-serif', color: '#39414d' }
-      }, { displayModeBar: false, responsive: true });
-    }).catch(function () {
-      var tbl = el('table', { 'class': 'chart-table' });
-      tbl.appendChild(el('tr', {}, [el('th', { text: t('dekad') }), el('th', { text: t('et') }),
-        el('th', { text: t('rain') }), el('th', { text: t('deficit') })]));
-      ser.dekads.forEach(function (d) {
-        tbl.appendChild(el('tr', {}, [el('td', { text: dekadLabel(d) }), el('td', { 'class': 'num', text: fmtMm(d.et_mm) }),
-          el('td', { 'class': 'num', text: fmtMm(d.rain_mm) }), el('td', { 'class': 'num', text: fmtMm(d.deficit_mm) })]));
-      });
-      node.replaceWith(tbl);
-    });
+  function renderChart(node, ser, level) {
+    Chart.render(node, waterBalanceSpec(ser, level));
   }
-
-  // ------------------------------------------------------------------ CSV
-  function downloadCSV(ser, id, label) {
-    var rows = [['id', 'name', 'dekad_start', 'dekad_end', 'water_needed_mm', 'rain_mm', 'deficit_mm', 'status']];
-    (ser ? ser.dekads : []).forEach(function (d) {
-      rows.push([id, label, d.start, d.end, d.et_mm, d.rain_mm, d.deficit_mm, d.status]);
-    });
-    rows.push([]);
-    rows.push(['# method', ser ? ser.et_method : meta.et_method]);
-    rows.push(['# sources', ser ? Object.keys(ser.sources).map(function (k) { return k + ': ' + ser.sources[k]; }).join(' | ') : '']);
-    rows.push(['# generated_at', (ser && ser.generated_at) || meta.generated_at]);
-    csv.download('kp-atlas-' + id + '.csv', rows);
-  }
-
   // ------------------------------------------------------------------ language, boot
   function applyLang() {
     i18n.applyRoot();
@@ -775,7 +868,9 @@
     state.playing = on;
     var btn = qs('playBtn');
     btn.classList.toggle('on', on);
-    btn.firstChild.firstChild.setAttribute('href', on ? '#i-pause' : '#i-play');
+    // the icon is the <use> inside the button; firstChild may be whitespace
+    var use = btn.querySelector('use');
+    if (use) use.setAttribute('href', on ? '#i-pause' : '#i-play');
     btn.setAttribute('aria-label', on ? t('pause') : t('play'));
     if (playTimer) { clearInterval(playTimer); playTimer = null; }
     if (!on) return;
@@ -827,7 +922,7 @@
         if (e.key !== 'Escape') return;
         var tag = (e.target.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'select' || tag === 'textarea') return;
-        if (state.level === 'uc') openDistrict(state.districtId);
+        if (state.level === 'uc') backToDistrict(state.districtId);
         else if (state.level === 'district') openProvince();
       });
       var hash = location.hash.slice(1);

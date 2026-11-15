@@ -90,9 +90,10 @@ html[dir="rtl"] .brand-text span { letter-spacing: 0; }
 
 /* ---------------------------------------------------------------- map tools */
 .map-tools { position: absolute; top: 14px; right: calc(var(--panel-w) + 14px); z-index: 500; display: flex; gap: 8px; }
-html[dir="rtl"] .map-tools { right: auto; left: calc(var(--panel-w) + 14px); }
+/* in RTL the panel sits on the left, so clear the zoom control (left: 10px, 34px wide) */
+html[dir="rtl"] .map-tools { right: auto; left: calc(var(--panel-w) + 58px); }
 body.show-map .map-tools, body.no-panel .map-tools { right: 14px; }
-html[dir="rtl"] body.show-map .map-tools { left: 14px; right: auto; }
+html[dir="rtl"] body.show-map .map-tools { left: 58px; right: auto; }
 .seg, .seg-btn.solo {
   display: flex; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--r-md); box-shadow: var(--shadow-2); overflow: hidden;

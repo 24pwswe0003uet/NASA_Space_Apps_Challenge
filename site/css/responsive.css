@@ -14,19 +14,17 @@
   :root { --header-h: 54px; }
   .brand-text span { display: none; }
   .tool-link span { display: none; }
-  .field .play {
-  display: grid; place-items: center; width: 24px; height: 24px; margin-inline-start: 2px;
-  border: 0; border-radius: 5px; background: rgba(255, 255, 255, .16); color: #fff; cursor: pointer;
-}
-.field .play:hover { background: rgba(255, 255, 255, .3); }
-.field .play.on { background: var(--nasa-red); }
-.tool-link { padding: 0 9px; }
+  .tool-link { padding: 0 9px; }
   .field select { max-width: 112px; font-size: 12.5px; }
   .stage { display: block; }
   #map { position: absolute; inset: 0; }
   .panel { position: absolute; inset: 0; width: auto; z-index: 700; border: 0; }
   .panel-inner { padding: 12px 15px 96px; }
   .map-toggle { display: inline-flex; }
+  /* keep the attribution and scale clear of the floating toggle */
+  .leaflet-control-attribution { font-size: 9px; max-width: 58vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .leaflet-bottom.leaflet-right .leaflet-control-scale { margin-bottom: 64px; }
+  .panel-close { display: grid; }
   body.show-map .panel { display: none; }
   body:not(.show-map) .leaflet-control-container { display: none; }
   .legend { width: 232px; left: 10px; bottom: 76px; }
@@ -50,6 +48,8 @@
   .doc td, .doc th { white-space: normal; min-width: 108px; }
   #scatter { height: 340px; }
   .chart { height: 250px; }
+  .measure { padding: 10px 11px; }
+  .actions .btn { flex: 1 1 calc(50% - 4px); justify-content: center; }
   /* comfortable touch targets */
   .list li { padding: 12px 4px; }
   .chip { padding: 9px 13px; }
@@ -72,13 +72,7 @@
   .top { gap: 7px; padding: 0 9px; }
   .field { padding: 0 6px; height: 32px; }
   .field select { max-width: 98px; }
-  .field .play {
-  display: grid; place-items: center; width: 24px; height: 24px; margin-inline-start: 2px;
-  border: 0; border-radius: 5px; background: rgba(255, 255, 255, .16); color: #fff; cursor: pointer;
-}
-.field .play:hover { background: rgba(255, 255, 255, .3); }
-.field .play.on { background: var(--nasa-red); }
-.tool-link { padding: 0 7px; height: 32px; }
+  .tool-link { padding: 0 7px; height: 32px; }
   .badge { font-size: 9.5px; padding: 3px 6px; }
   .status-big .v { font-size: 30px; }
   .stats { grid-template-columns: 1fr 1fr; }
