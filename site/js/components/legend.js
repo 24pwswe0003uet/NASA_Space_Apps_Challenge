@@ -58,11 +58,14 @@ Atlas.components.legend = (function () {
         document.createTextNode(t('legend_note', { basis: t('basis_' + (meta.status_basis === 'cropland' ? 'cropland' : 'irrigated')) }) + ' '),
         el('a', { href: 'guide.html', text: t('legend_learn') })]));
     } else {
+      var zero = layer.zeroBase !== false;
+      var lo = zero ? '0' : util.fmtInt(ctx.min);
+      var hi = zero ? util.fmtInt(ctx.breaks && ctx.breaks[3]) + '+' : util.fmtInt(ctx.max);
       body.appendChild(el('div', { 'class': 'ramp' }));
       body.appendChild(el('div', { 'class': 'ramp-labels' }, [
-        el('span', { text: '0' }), el('span', { text: util.fmtInt(ctx.breaks && ctx.breaks[3]) + '+ ' + unit(layer) })]));
+        el('span', { text: lo }), el('span', { text: hi + ' ' + unit(layer) })]));
       body.appendChild(el('div', { 'class': 'legend-note',
-        text: t(state.level === 'province' ? 'layer_note_province' : 'layer_note') }));
+        text: t(layer.noteKey || (state.level === 'province' ? 'layer_note_province' : 'layer_note')) }));
     }
     box.appendChild(body);
     if (Temporal) Temporal.apply(Layers.isTemporal(layer.id), t);

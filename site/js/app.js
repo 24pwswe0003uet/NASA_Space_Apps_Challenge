@@ -36,7 +36,14 @@
     qs('mapToggleLabel').textContent = on ? t('show_map') : t('show_details');
     if (!on && map) setTimeout(function () { map.invalidateSize(); }, 60);
   }
-  function renderLegend(breaks) { legend.render({ breaks: breaks }); }
+  function renderLegend(ctx) { legend.render(ctx || {}); }
+  // The legend needs the real range for layers that do not start at zero.
+  function rangeCtx(breaks, vals) {
+    if (!breaks) return { breaks: null };
+    var lo = Infinity, hi = -Infinity;
+    vals.forEach(function (v) { if (v == null) return; if (v < lo) lo = v; if (v > hi) hi = v; });
+    return { breaks: breaks, min: lo === Infinity ? null : lo, max: hi === -Infinity ? null : hi };
+  }
 
   // Data access is delegated to the shared data service
   // (js/services/data-service.js), which owns the data/ URLs, caching and the
@@ -227,8 +234,8 @@
     var layer = currentLayer();
     var status = layer.id === 'status';
     var dim = state.level !== 'province' || state.detail;
-    var breaks = status ? null
-      : quantiles(districts.features.map(function (f) { return f.properties[layer.id]; }));
+    var vals = districts.features.map(function (f) { return f.properties[layer.id]; });
+    var breaks = status ? null : quantiles(vals);
     function fill(p) { return status ? styleFor(p._st, dim) : rampStyle(haColor(p[layer.id], breaks), dim); }
     districtLayer = L.geoJSON(districts, {
       style: function (f) { var p = f.properties; p._st = statusById ? statusById[p.district_id] : p.status; return fill(p); },
@@ -248,15 +255,15 @@
     }).addTo(map);
     if (dim && ucLayer) ucLayer.bringToFront();
     updateLabels();
-    return breaks;
+    return rangeCtx(breaks, vals);
   }
 
   function drawUCs(fc, statusById) {
     if (ucLayer) map.removeLayer(ucLayer);
     var layer = currentLayer();
     var status = layer.id === 'status';
-    var breaks = status ? null
-      : quantiles(fc.features.map(function (f) { return f.properties[layer.id]; }));
+    var vals = fc.features.map(function (f) { return f.properties[layer.id]; });
+    var breaks = status ? null : quantiles(vals);
     ucLayer = L.geoJSON(fc, {
       style: function (f) {
         var p = f.properties;
@@ -280,7 +287,7 @@
     }).addTo(map);
     ucLayer.bringToFront();
     updateLabels();
-    return breaks;
+    return rangeCtx(breaks, vals);
   }
 
   function statusesFor(features, idKey) {

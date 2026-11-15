@@ -30,6 +30,8 @@
     sym('play', '<path d="M8 5.5v13l11-6.5z"/>') +
     sym('pause', '<path d="M9 5v14M15 5v14"/>') +
     sym('refresh', '<path d="M20 11A8 8 0 0 0 6.3 6.3L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 13a8 8 0 0 0 13.7 4.7L20 15.5"/><path d="M20 20v-4.5h-4.5"/>') +
+    sym('mountain', '<path d="m3 20 6.5-11 3.6 5.9 2.1-3L21 20Z"/><circle cx="6.4" cy="6.6" r="1.6"/>') +
+    sym('slope', '<path d="M3 20h18"/><path d="M3 20 19 7"/><path d="M15 7h4v4"/>') +
     '</svg>';
 
   function sym(id, body) {
