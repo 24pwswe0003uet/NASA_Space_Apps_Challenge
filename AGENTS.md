@@ -11,8 +11,8 @@
 | Roadmap | Five phases (Foundation, Core Atlas, Data Visualization, Methods/i18n, Final Integration) |
 | Last repository inspection | 2026-11-15 |
 | Last updated | 2026-11-15 |
-| Current overall progress | **~45%** (assessment) — upstream base provides the shell, map, charts, and real data; Phase 2 layer architecture refactored and verified |
-| Current status | Phase 2 in progress on the `upstream/main` base (real data, contract `mode:"live"`). Layer catalog/service refactor and province-level layer control built and verified via headless render. |
+| Current overall progress | **~50%** (assessment) — upstream base provides the shell, map, charts, and real data; Phase 2 layer architecture refactored and verified; Stage 1 derived indicators (POWER agro-climate + SRTM terrain) added as additive contract v0.3 |
+| Current status | Phase 2 complete in scope on the `upstream/main` base (real data, contract `mode:"live"`). New: data-lead Stage 1 — pipeline computes POWER-derived agro-climate indicators and SRTM terrain statistics into an additive v0.3 contract, and a frontend PR adds Elevation/Slope terrain layers. Real data generation runs in the `update-data` Action and is pending. |
 
 > **Read this file before starting any project task.**
 > This document overrides assumptions from previous sessions, prompts, branches, pull requests, chat history, and the legacy prototype. If a request conflicts with this file, stop and explain the conflict before changing architecture, scope, technology, or data claims.
@@ -280,11 +280,12 @@ The working base is `upstream/main` (`786f9a1`), which already ships a working A
 | Root files | `AGENTS.md`, `README.md`, `LICENSE`, plus `data/`, `docs/`, `pipeline/`, `scripts/`, `.github/` |
 | `site/` | Working Atlas: `index.html`, `methods.html`, `guide.html`, `css/style.css`, `js/*`, `strings.json` |
 | `site/js` | `app.js`, `icons.js`, `guide.js`, `methods.js`, `data-snapshot.js`, plus new `layers/`, `services/`, `components/` |
-| `data/` | Real data, contract v0.2 (`mode:"live"`): `meta.json`, `districts.geojson` (31), `ucs/` (122 tehsils), `series/`, `validation.csv` |
+| `data/` | Real data, contract v0.2 (`mode:"live"`): `meta.json`, `districts.geojson` (31), `ucs/` (122 tehsils), `series/`, `validation.csv`. Stage 1 (branch `data/stage-1-keyless`) adds `indicators/` and `static/` and `contract_version:"0.3"` — pipeline built and verified, real files pending the Action run |
+| `pipeline/` | `prepare_boundaries.py`, `fetch_power.py`, `build_series.py`, `validate_data.py`, `worldcover_stats.py`, `worldcereal_zenodo.py`, `et0.py`, `geo.py`, `dekads.py`, `http_zip.py`; Stage 1 adds `power_indicators.py`, `fetch_srtm.py`, `terrain_stats.py`, `indicators.json` |
 | Leaflet | Present (CDN, `1.9.4`); charts drawn without Plotly |
 | i18n / RTL | Present: `strings.json` with `en`/`ur`/`ps` and `dir` switching |
 | Deployment configuration | Present: `.github/workflows/deploy-pages.yml`; `scripts/build-site.sh`, `scripts/serve.sh` |
-| Atlas phase implementation | Phase 1 + Phase 2 substantially present; Phase 3/4 partially present (upstream) |
+| Atlas phase implementation | Phase 1 + Phase 2 substantially present; Phase 3/4 partially present (upstream); Stage 1 terrain layers added on `feature/stage-1-terrain-layers` |
 
 The legacy prototype was removed on 2026-11-14. It is recorded in section 13 and earns no phase credit.
 
@@ -669,8 +670,8 @@ The roadmap describes the five planned phases. It does not mean any phase is com
 | Phase | Name | Status | Progress | Verified notes |
 |---|---|---|---|---|
 | Phase 1 | Foundation, Architecture & Design System | In Progress | 85% | Upstream base provides design system, shared shell, components, and i18n (en/ur/ps) with RTL; consolidated on the feature branch |
-| Phase 2 | Core Atlas & Geographic Exploration | In Progress | 60% | Map, boundaries, selection, layers, legends, and period controls present; layer catalog/service refactor and province-level layer control built and verified in headless render |
-| Phase 3 | Agricultural & Environmental Data Visualization | In Progress | 45% | Status cards, charts, series data, and CSV export present in the upstream base; requires review against the contract |
+| Phase 2 | Core Atlas & Geographic Exploration | In Progress | 65% | Map, boundaries, selection, layers, legends, and period controls present; layer catalog/service refactor and province-level layer control built and verified in headless render; new Terrain category (Elevation/Slope) verified in headless render |
+| Phase 3 | Agricultural & Environmental Data Visualization | In Progress | 55% | Status cards, charts, series data, and CSV export present; Stage 1 adds POWER agro-climate indicators and SRTM terrain statistics to the contract (v0.3) with pipeline and validation; real data generation pending the Action run |
 | Phase 4 | Methods, Data Sources, Validation & Multilingual Support | In Progress | 35% | Methods page, in-site guide, and three-language strings present; methodology/validation sign-off pending |
 | Phase 5 | Final Integration, Performance & QA | Not Started | 5% | GitHub Pages workflow exists; full QA, performance, and responsive verification pending |
 
@@ -678,15 +679,15 @@ The roadmap describes the five planned phases. It does not mean any phase is com
 
 | Metric | Value |
 |---|---|
-| Overall completion | **~45%** (assessment) |
-| Current active phase | Phase 2 — Core Atlas Interface & Interactive Geographic Exploration |
+| Overall completion | **~50%** (assessment) |
+| Current active phase | Phase 3 — Agricultural & Environmental Data Visualization |
 | Completed phases | 0 of 5 |
 | Pending phases | All five |
-| Critical issues | Responsive/keyboard and browser-console verification outstanding; production data contract and scientific sign-off still pending |
+| Critical issues | Responsive/keyboard and browser-console verification outstanding; production data contract and scientific sign-off still pending; Stage 1 real data not yet generated |
 | External dependencies | See section 11 |
-| Next development priority | Finish Phase 2 verification (responsive, keyboard, RTL), then Phase 3 review against the live contract |
+| Next development priority | Run the `update-data` Action to generate the Stage 1 data, then verify it and close Phase 2 verification (responsive, keyboard, RTL) |
 
-Progress is calculated only from verified tasks. Percentages for Phases 1, 3, and 4 are assessments of the upstream base and have not been independently re-verified line by line; Phase 2 items were exercised in a headless render.
+Progress is calculated only from verified tasks. Percentages for Phases 1, 3, and 4 are assessments of the upstream base and have not been independently re-verified line by line; Phase 2 items and the Stage 1 terrain layers were exercised in a headless render; Stage 1 pipeline scripts were exercised against a synthetic POWER cache and DEM tile.
 
 ### Phase 1 tracker
 
@@ -707,13 +708,13 @@ Progress is calculated only from verified tasks. Percentages for Phases 1, 3, an
 | Field | Value |
 |---|---|
 | Status | In Progress |
-| Progress | 60% |
-| Completed tasks | Leaflet map with KP framing; district/tehsil boundaries via the data service; selection state; province/district/tehsil panels; layer chips; metadata-driven legend; dekad period control; source/period/resolution disclosure. Phase 2 refactor: `js/layers/catalog.js`, `js/services/layer-service.js`, `js/components/layer-control.js`, `js/components/temporal.js`; province-level layer control; ramp legend + period-control gating for static layers |
+| Progress | 65% |
+| Completed tasks | Leaflet map with KP framing; district/tehsil boundaries via the data service; selection state; province/district/tehsil panels; layer chips; metadata-driven legend; dekad period control; source/period/resolution disclosure. Phase 2 refactor: `js/layers/catalog.js`, `js/services/layer-service.js`, `js/components/layer-control.js`, `js/components/temporal.js`; province-level layer control; ramp legend + period-control gating for static layers. Stage 1 adds a Terrain category with Elevation/Slope continuous layers (legend note + real min/max range) |
 | Partially completed tasks | Responsive map workspace and keyboard interaction not machine-verified |
 | Pending tasks | Responsive/keyboard verification; dataset selection interface decision |
-| Known bugs | None observed in headless render (province, district, tehsil; status and hectare layers) |
+| Known bugs | None observed in headless render (province, district, tehsil; status, hectare and terrain layers) |
 | Blockers | Responsive/keyboard/browser-console verification; production data contract and scientific sign-off |
-| Relevant files | `site/js/app.js`, `site/js/layers/catalog.js`, `site/js/services/layer-service.js`, `site/js/components/layer-control.js`, `site/js/components/temporal.js`, `site/index.html`, `site/strings.json`, `site/css/style.css` |
+| Relevant files | `site/js/app.js`, `site/js/layers/catalog.js`, `site/js/services/layer-service.js`, `site/js/components/layer-control.js`, `site/js/components/temporal.js`, `site/js/components/legend.js`, `site/js/icons.js`, `site/index.html`, `site/strings.json`, `site/css/style.css` |
 | Next action | Verify responsive breakpoints, keyboard navigation, and RTL; then review Phase 3 against the live contract |
 
 ### Phase 3 tracker
@@ -721,14 +722,14 @@ Progress is calculated only from verified tasks. Percentages for Phases 1, 3, an
 | Field | Value |
 |---|---|
 | Status | In Progress |
-| Progress | 45% |
-| Completed tasks | Status cards, per-district/tehsil charts, a time-series line, CSV export, and series data are present in the upstream base |
-| Partially completed tasks | Review against the live contract; chart loading/empty/error states |
-| Pending tasks | Formal review of indicator views, units, and CSV columns |
+| Progress | 55% |
+| Completed tasks | Status cards, per-district/tehsil charts, a time-series line, CSV export, and series data are present in the upstream base. Stage 1 adds `pipeline/power_indicators.py` (frost_days/gdd/t_mean) and `pipeline/fetch_srtm.py` + `pipeline/terrain_stats.py` (elevation/slope), an additive v0.3 contract (`data/indicators/`, `data/static/`, `meta.indicators`) and validation |
+| Partially completed tasks | Review against the live contract; chart loading/empty/error states; temporal indicator layers not yet wired to the dekad slider |
+| Pending tasks | Formal review of indicator views, units, and CSV columns; generate real Stage 1 data via the Action |
 | Known bugs | None observed in headless render |
-| Blockers | Scientific sign-off on units/periods; production data contract |
-| Relevant files | `site/js/app.js`, `site/js/methods.js`, `data/series/`, `site/strings.json` |
-| Next action | Review Phase 3 views against the live contract |
+| Blockers | Scientific sign-off on units/periods and on the frost threshold / GDD base / slope bands; production data contract; Action run |
+| Relevant files | `site/js/app.js`, `site/js/methods.js`, `data/series/`, `data/indicators/`, `data/static/`, `pipeline/power_indicators.py`, `pipeline/terrain_stats.py`, `site/strings.json` |
+| Next action | Generate Stage 1 data via the Action, then review Phase 3 views against the live contract |
 
 ### Phase 4 tracker
 
@@ -760,11 +761,11 @@ Progress is calculated only from verified tasks. Percentages for Phases 1, 3, an
 
 ### Verified completed features
 
-The upstream base ships a working Atlas (map, boundaries, selection, charts, CSV export, three-language interface) against real data. On top of it, the Phase 2 layer catalog/service refactor and province-level layer control were verified in a headless render (province, district, tehsil; status and hectare layers).
+The upstream base ships a working Atlas (map, boundaries, selection, charts, CSV export, three-language interface) against real data. On top of it, the Phase 2 layer catalog/service refactor and province-level layer control were verified in a headless render (province, district, tehsil; status and hectare layers). Stage 1 terrain layers (Elevation/Slope) were verified in a headless render against a synthetic DEM, and the Stage 1 pipeline scripts were exercised against a synthetic POWER cache and DEM tile.
 
 ### Remaining work
 
-Phase 2 responsive/keyboard/browser-console verification; Phase 3 review against the live contract; Phase 4 methodology/validation and translation review; Phase 5 QA and deployment verification.
+Generate the Stage 1 real data via the `update-data` Action; Phase 2 responsive/keyboard/browser-console verification; Phase 3 review against the live contract; Phase 4 methodology/validation and translation review; Phase 5 QA and deployment verification.
 
 ---
 
@@ -956,7 +957,7 @@ When completing meaningful work:
 | D-04 | Verified administrative boundaries for KP | Phase 2 | Atlas map cannot render real geography | Data lead | Partially resolved — upstream `data/districts.geojson` (31 districts) and `data/ucs/` (122 tehsils) render; authoritative confirmation pending |
 | D-05 | Dataset selection and KP-coverage verification | Phase 2–3 | Risk of unusable or misleading layers | Science/data leads | Partially resolved — `status` + `crop_ha` live; `crop_type` source not live (wheat/maize/irrigated disabled) |
 | D-06 | Metadata: periods, units, resolution, coverage, thresholds | Phase 2–4 | Risk of fabricated periods and classifications | Data/science leads | Partially resolved — `data/meta.json` supplies dekads, units, thresholds, sources; scientific sign-off pending |
-| D-07 | Confirmed indicator and time-series data | Phase 3 | Charts and statistics cannot show real values | Data lead | Open |
+| D-07 | Confirmed indicator and time-series data | Phase 3 | Charts and statistics cannot show real values | Data lead | Partially resolved — Stage 1 pipeline produces POWER agro-climate indicators and SRTM terrain statistics into contract v0.3; real files pending the `update-data` Action run |
 | D-08 | Validation reference data and approved statistics | Phase 4 | Validation section cannot show real comparisons | Science lead | Open |
 | D-09 | Approved methodology, wording, and limitations | Phase 4 | Risk of inaccurate scientific claims | Science lead | Open |
 | D-10 | Urdu and Pashto translation review | Phase 4 | Risk of poor or inconsistent translations | Translation reviewer | Open |
@@ -1011,6 +1012,10 @@ The legacy files have been removed, so Phase 1 implementation may proceed. Do no
 | 2026-11-15 | Base pivot: adopted `upstream/main` (advanced 8 commits) as the working base; upstream provides a working Atlas, real data (`data/`, contract v0.2, `mode:"live"`), docs, pipeline, and deploy scripts. Committed prior Phase 2 work as a checkpoint on `feature/phase-2-atlas-map` and preserved it on `feature/phase-2-legacy-foundation`. | OpenCode, on behalf of the frontend owner |
 | 2026-11-15 | Phase 2 refactor-and-extend on `feature/phase-2-atlas-v2`: added `site/js/layers/catalog.js` (single source of truth for layers/categories/availability), `site/js/services/layer-service.js` (`window.AtlasLayers`), `site/js/components/layer-control.js`, and `site/js/components/temporal.js`; wired `site/js/app.js` to the catalog, added a province-level layer control, ramp legends for continuous layers, and period-control gating for static layers; extended `site/strings.json` (en/ur/ps) and `site/css/style.css`. | OpenCode, on behalf of the frontend owner |
 | 2026-11-15 | Verified Phase 2 in a headless render: province, district, and tehsil views render with real data; grouped layer chips (3 categories, unavailable layers disabled); status legend and continuous-layer ramp legend; period control disabled for static layers. Fixed two bugs found in review: `state.layer` now initialises from the catalog default, and province/district/tehsil legends receive the ramp breaks. Updated `AGENTS.md` to reflect the new base and Phase 2 status. | OpenCode, on behalf of the frontend owner |
+| 2026-11-15 | Phase 3 (frontend) on `feature/phase-3-data-visualization` (`494de5c`): district and union-council exploration, reusable stats/charts, CSV export. Docs on `data/source-assessment` (`23fc15b`): data source assessment report. | OpenCode, on behalf of the frontend owner |
+| 2026-11-15 | Restored the v0.2 `data/meta.json` and `data/validation.csv` (regression D-13) on `data/restore-v02-meta` (`1438bf1`); the committed meta had lost `dekads`/`mode`/`thresholds` and broke the Atlas boot. | OpenCode, on behalf of the frontend owner |
+| 2026-11-15 | Stage 1 (data lead) on `data/stage-1-keyless` (`05a3add`): added `pipeline/power_indicators.py` (frost_days, gdd, t_mean from the existing POWER cache), `pipeline/fetch_srtm.py` + `pipeline/terrain_stats.py` (keyless SRTMGL1 -> elevation/slope), `pipeline/indicators.json`, an additive contract v0.3 (`data/indicators/`, `data/static/`, `meta.indicators`, `nasa_power`/`srtm` sources), extended `validate_data.py`, CI steps and caching, and `docs/indicators.md` + the v0.3 contract section. Verified locally: POWER indicator maths against a synthetic cache, terrain statistics against a synthetic DEM tile (voids excluded), and the extended validator (pass + negative cases). Real data generation pending the `update-data` Action run. Frost threshold, GDD base, and slope bands are documented defaults awaiting science-lead approval. | OpenCode, on behalf of the frontend owner |
+| 2026-11-15 | Stage 1 (frontend) on `feature/stage-1-terrain-layers` (`3865eeb`): added a Terrain category with Elevation/Slope continuous layers (`site/js/layers/catalog.js`), a per-layer legend note and real min/max range for non-zero-based ramps (`site/js/components/legend.js`, `site/js/app.js`), `mountain`/`slope` icons, and `en`/`ur`/`ps` strings. Verified in a headless render: the layer control lists all four categories with the crop-type layers disabled and the terrain layers enabled, and the Elevation legend renders its SRTM note and range; the status layer legend was re-checked for regression. Layers stay disabled until `meta.json` reports the `srtm` source live. | OpenCode, on behalf of the frontend owner |
 
 ---
 
